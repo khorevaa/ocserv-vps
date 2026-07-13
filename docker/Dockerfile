@@ -5,8 +5,8 @@ FROM ${BASE_IMAGE} AS builder
 RUN set -eux; \
     apk add --no-cache \
       autoconf automake build-base busybox-static gettext-dev gperf libtool \
-      gnutls-dev libev-dev libseccomp-dev linux-headers meson ninja \
-      pax-utils pkgconf protobuf-c-compiler protobuf-c-dev py3-pyelftools readline-dev \
+      gnutls-dev lddtree libev-dev libseccomp-dev linux-headers meson ninja \
+      pkgconf protobuf-c-compiler protobuf-c-dev readline-dev \
       talloc-dev tini-static
 
 COPY source /usr/src/ocserv
