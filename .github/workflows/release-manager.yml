@@ -1,0 +1,68 @@
+name: Release manager
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate release version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          [[ "${TAG#v}" == "$(<VERSION)" ]]
+
+      - name: Check shell syntax
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do bash -n "${file}"; done \
+            < <(find . -path './.git' -prune -o -type f -name '*.sh' -print0)
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version: '1.26.5'
+          cache-dependency-path: |
+            ui/web/go.mod
+            ui/control/go.mod
+
+      - name: Run Go tests
+        run: |
+          set -euo pipefail
+          (cd ui/web && go test ./...)
+          (cd ui/control && go test ./...)
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+
+      - name: Run installer contract tests
+        run: sudo "$(command -v python)" -m unittest discover -s ui/control/tests -p 'test_*.py' -v
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Check frontend JavaScript
+        run: |
+          node --check ui/web/app/static/access.js
+          node --check ui/web/app/static/app.js
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "${TAG}" --verify-tag --generate-notes --title "ocserv-vps ${TAG}"
