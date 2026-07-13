@@ -58,6 +58,68 @@ prompt_value() {
   printf -v "${variable}" '%s' "${value}"
 }
 
+published_ghcr_versions() {
+  local repository="$1" token_response token tags_response
+  [[ "${repository}" =~ ^[a-z0-9][a-z0-9._/-]{0,127}$ ]] || \
+    die "invalid GHCR repository: ${repository}"
+  token_response="$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+    --retry 3 --connect-timeout 15 --max-time 60 \
+    "https://ghcr.io/token?scope=repository:${repository}:pull")" || \
+    die "could not request a GHCR pull token for ${repository}"
+  token="$(sed -n 's/^.*"token":"\([^"]*\)".*$/\1/p' <<<"${token_response}")"
+  [[ "${token}" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || \
+    die "GHCR did not return a valid pull token for ${repository}"
+  tags_response="$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+    --retry 3 --connect-timeout 15 --max-time 60 \
+    --header "Authorization: Bearer ${token}" \
+    "https://ghcr.io/v2/${repository}/tags/list?n=1000")" || \
+    die "could not load published GHCR tags for ${repository}"
+  sed -n 's/^.*"tags":[[:space:]]*\[\([^]]*\)\].*$/\1/p' <<<"${tags_response}" | \
+    tr ',' '\n' | \
+    sed -En 's/^[[:space:]]*"([0-9]+(\.[0-9]+){1,3}([._-][0-9A-Za-z][0-9A-Za-z._-]*)?)"[[:space:]]*$/\1/p' | \
+    LC_ALL=C sort -Vu
+}
+
+latest_published_image_version() {
+  [[ $# -gt 0 ]] || die 'at least one GHCR repository is required'
+  local repository versions candidates='' first=1 value
+  for repository in "$@"; do
+    versions="$(published_ghcr_versions "${repository}")" || \
+      die "could not resolve published versions for ${repository}"
+    [[ -n "${versions}" ]] || die "no published release tags found for ${repository}"
+    if [[ ${first} -eq 1 ]]; then
+      candidates="${versions}"
+      first=0
+    else
+      candidates="$(comm -12 \
+        <(printf '%s\n' "${candidates}" | LC_ALL=C sort -u) \
+        <(printf '%s\n' "${versions}" | LC_ALL=C sort -u))" || \
+        die 'could not compare published GHCR versions'
+    fi
+  done
+  value="$(printf '%s\n' "${candidates}" | sed '/^$/d' | LC_ALL=C sort -V | tail -n 1)"
+  [[ -n "${value}" ]] || die 'the requested GHCR packages have no common published version'
+  printf '%s\n' "${value}"
+}
+
+prompt_image_version() {
+  local variable="$1" prompt="$2" env_name="$3" value
+  shift 3
+  if [[ ${noninteractive} -eq 1 ]]; then
+    value="${!env_name:-}"
+  else
+    read -r -p "${prompt} [latest]: " value
+  fi
+  if [[ -z "${value}" || "${value,,}" == latest ]]; then
+    value="$(latest_published_image_version "$@")" || \
+      die "could not resolve the latest published version for ${prompt}"
+    echo -e "${blue}Using latest published ${prompt}: ${value}.${plain}"
+  fi
+  [[ "${value}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ && "${value}" != latest ]] || \
+    die "${env_name} must be a safe image version or latest"
+  printf -v "${variable}" '%s' "${value}"
+}
+
 prompt_optional() {
   local variable="$1" prompt="$2" default_value="$3" env_name="$4" value
   if [[ ${noninteractive} -eq 1 ]]; then
@@ -131,7 +193,8 @@ install_stack() {
   prompt_value domain 'VPN domain' '' OCSERV_DOMAIN
   prompt_value email 'ACME email' '' OCSERV_ACME_EMAIL
   prompt_value username 'Initial VPN username' 'vpnuser' OCSERV_VPN_USERNAME
-  prompt_value version 'ocserv image version' '1.5.0-slim' OCSERV_VERSION
+  prompt_image_version version 'ocserv image version' OCSERV_VERSION \
+    khorevaa/ocserv-vps-server
   prompt_value vpn_network 'VPN IPv4 network' '10.66.0.0/24' OCSERV_VPN_NETWORK
   prompt_value vpn_port 'VPN TCP/UDP port' '443' OCSERV_VPN_PORT
   prompt_value dns_primary 'Primary DNS' '1.1.1.1' OCSERV_DNS_PRIMARY
@@ -155,7 +218,8 @@ install_stack() {
   runtime_task bootstrap-vps.sh "${args[@]}"
 
   if [[ ${install_ui} -eq 1 ]]; then
-    prompt_value ui_version 'UI version' '0.4.16' OCSERV_UI_VERSION
+    prompt_image_version ui_version 'UI version' OCSERV_UI_VERSION \
+      khorevaa/ocserv-vps-ui-web khorevaa/ocserv-vps-ui-control
     runtime_task install-ui.sh \
       --ui-version "${ui_version}" \
       --ui-image "ghcr.io/khorevaa/ocserv-vps-ui-web:${ui_version}" \
@@ -179,7 +243,8 @@ add_user() {
 update_vpn() {
   require_root
   local version image
-  prompt_value version 'New ocserv image version' '' OCSERV_VERSION
+  prompt_image_version version 'New ocserv image version' OCSERV_VERSION \
+    khorevaa/ocserv-vps-server
   require_approval 'VPN restart and active-session interruption' OCSERV_APPROVE_RESTART
   image="ghcr.io/khorevaa/ocserv-vps-server:${version}"
   runtime_task deploy-release.sh --version "${version}" --image "${image}" --approve-restart
@@ -196,7 +261,8 @@ rollback_vpn() {
 install_ui() {
   require_root
   local version ssh_port
-  prompt_value version 'UI version' '0.4.16' OCSERV_UI_VERSION
+  prompt_image_version version 'UI version' OCSERV_UI_VERSION \
+    khorevaa/ocserv-vps-ui-web khorevaa/ocserv-vps-ui-control
   prompt_value ssh_port 'SSH port for tunnel instructions' '22' OCSERV_SSH_PORT
   require_approval 'VPN/UI restart during UI installation' OCSERV_APPROVE_RESTART
   runtime_task install-ui.sh \
@@ -209,7 +275,8 @@ install_ui() {
 update_ui() {
   require_root
   local version
-  prompt_value version 'New UI version' '' OCSERV_UI_VERSION
+  prompt_image_version version 'New UI version' OCSERV_UI_VERSION \
+    khorevaa/ocserv-vps-ui-web khorevaa/ocserv-vps-ui-control
   require_approval 'UI restart' OCSERV_APPROVE_RESTART
   runtime_task upgrade-ui.sh \
     --ui-version "${version}" \
@@ -260,13 +327,29 @@ uninstall_stack() {
 
 update_manager() {
   require_root
+  local repository='khorevaa/ocserv-vps'
   local version="${1:-}"
-  local installer
-  installer="$(mktemp)"
-  trap 'rm -f "${installer}"' RETURN
-  curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
-    --output "${installer}" 'https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh'
-  OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" ${version:+"${version}"}
+  local tag="${version}"
+  if [[ -z "${tag}" ]]; then
+    # Resolve the latest published release tag instead of tracking the mutable
+    # develop branch, so an update never runs code from an unreleased ref.
+    local response
+    response="$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+      --retry 3 --connect-timeout 15 --max-time 60 \
+      "https://api.github.com/repos/${repository}/releases/latest")"
+    tag="$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' <<<"${response}" | head -n 1)"
+  fi
+  [[ "${tag}" =~ ^v?[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]] || \
+    die "Could not resolve a valid release tag to update from: ${tag:-<empty>}"
+  # Subshell + EXIT trap so the downloaded installer is always removed, even when
+  # set -e aborts the pipeline (a function RETURN trap would be skipped).
+  (
+    installer="$(mktemp)"
+    trap 'rm -f "${installer}"' EXIT
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+      --output "${installer}" "https://raw.githubusercontent.com/${repository}/${tag}/install.sh"
+    OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" "${tag}"
+  )
 }
 
 show_menu() {
@@ -337,6 +420,8 @@ Commands:
 Without a command, an interactive menu is shown. For unattended installation,
 set OCSERV_VPS_NONINTERACTIVE=1 plus OCSERV_DOMAIN, OCSERV_ACME_EMAIL,
 OCSERV_APPROVE_FIREWALL=1, and OCSERV_APPROVE_RESTART=1.
+Image version prompts default to the latest published immutable GHCR tag; set
+OCSERV_VERSION or OCSERV_UI_VERSION to pin a specific version.
 EOF
 }
 

@@ -855,7 +855,7 @@ health_check_stack() {
   done
   warn "Health check failed for ${expected_image}."
   docker inspect "${OCSERV_CONTAINER}" 2>/dev/null | sed -n '1,120p' >&2 || true
-  docker logs --tail 100 "${OCSERV_CONTAINER}" 2>&1 >&2 || true
+  docker logs --tail 100 "${OCSERV_CONTAINER}" >&2 2>&1 || true
   return 1
 }
 
@@ -896,8 +896,8 @@ health_check_ui_stack() {
     sleep 1
   done
   warn 'Managed UI health check failed.'
-  docker logs --tail 100 ocserv-vps-control >&2 2>/dev/null || true
-  docker logs --tail 100 ocserv-vps-ui >&2 2>/dev/null || true
+  docker logs --tail 100 ocserv-vps-control >&2 2>&1 || true
+  docker logs --tail 100 ocserv-vps-ui >&2 2>&1 || true
   return 1
 }
 

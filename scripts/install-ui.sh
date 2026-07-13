@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Guard: this task script is sourced by the ocserv-vps entrypoint after
+# common.sh. Running it directly leaves die()/set -euo pipefail undefined,
+# which silently bypasses approval and safety gates. Refuse that.
+if [[ "$(type -t die)" != function ]]; then
+  printf '%s\n' 'Run this through the ocserv-vps entrypoint, not directly.' >&2
+  exit 1
+fi
+
 usage() {
   cat <<'EOF'
 Usage: remote-install-ui.sh --ui-version <version>
@@ -422,6 +430,9 @@ chown root:10001 \
   "${UI_SECRETS_DIR}/session-key" "${UI_SECRETS_DIR}/access-secret"
 chmod 0440 \
   "${UI_SECRETS_DIR}/session-key" "${UI_SECRETS_DIR}/access-secret"
+# Create the file 0600 before writing so the access secret is never briefly
+# readable under a group-permissive umask.
+install -m 0600 /dev/null "${UI_ACCESS_HANDOFF}"
 cat > "${UI_ACCESS_HANDOFF}" <<EOF
 url=http://${UI_LOCAL_HOST}:${UI_PORT}
 remote_socket=${UI_WEB_SOCKET}
@@ -430,7 +441,6 @@ access_secret=${ACCESS_SECRET}
 expires=operator session is valid for at most 12 hours
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
-chmod 0600 "${UI_ACCESS_HANDOFF}"
 
 cat > "${OCSERV_UI_ENV_FILE}" <<EOF
 OCSERV_UI_IMAGE=${UI_IMAGE}
@@ -659,7 +669,7 @@ output = Path(sys.argv[2])
 output_stat = output.lstat()
 if (
     not stat.S_ISREG(output_stat.st_mode)
-    or output_stat.st_uid != 0
+    or output_stat.st_uid != os.geteuid()
     or stat.S_IMODE(output_stat.st_mode) != 0o600
     or output_stat.st_nlink != 1
 ):
@@ -674,7 +684,7 @@ try:
     opened_stat = os.fstat(fd)
     if (
         not stat.S_ISREG(opened_stat.st_mode)
-        or opened_stat.st_uid != 0
+        or opened_stat.st_uid != os.geteuid()
         or stat.S_IMODE(opened_stat.st_mode) != 0o600
         or opened_stat.st_nlink != 1
         or (opened_stat.st_dev, opened_stat.st_ino)

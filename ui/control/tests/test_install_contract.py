@@ -499,6 +499,17 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn('themeButton.setAttribute("aria-checked", String(dark))', app)
         self.assertIn('.theme-toggle[aria-checked="true"] .theme-toggle__thumb', styles)
 
+    def test_error_panels_use_theme_aware_high_contrast_text(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        styles = (repository / "ui" / "web" / "app" / "static" / "styles.css").read_text(
+            encoding="utf-8"
+        )
+        block = styles.split(".alert--danger {", 1)[1].split("}", 1)[0]
+        self.assertIn("color: var(--danger-text);", block)
+        self.assertEqual(styles.count("--danger-text: #a62832;"), 1)
+        self.assertEqual(styles.count("--danger-text: #ff9ca3;"), 2)
+        self.assertNotIn("color: #a62832;", block)
+
     def test_controller_tunnel_helpers_use_exact_installed_url(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         shell_helper = (repository / "helpers" / "ui-tunnel.sh").read_text(
@@ -538,7 +549,9 @@ class InstallComposeContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("ocserv_validate_ssh_target", ssh_library)
-        self.assertIn('"${ssh_args[@]}" -- "${host}"', ssh_library)
+        # The tunnel helper performs the ssh invocation and must terminate option
+        # parsing with `--` before the untrusted host argument.
+        self.assertIn('-- "${HOST}"', shell_helper)
 
     @unittest.skipUnless(os.name == "posix", "strict file modes require POSIX")
     def test_cli_probe_strictly_converts_secure_cookies_to_root_only_header(self) -> None:

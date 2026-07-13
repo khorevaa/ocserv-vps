@@ -117,5 +117,10 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=builder /runtime /
 COPY --chmod=0755 entrypoint.sh /usr/local/sbin/ocserv-container-entrypoint
 
+# Liveness via the local occtl control socket: succeeds only while ocserv is up
+# and answering. Exec form (no shell) because the runtime is FROM scratch.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["/usr/local/bin/occtl", "-s", "/run/ocserv-control/occtl.sock", "show", "status"]
+
 ENTRYPOINT ["/sbin/tini", "-g", "--"]
 CMD ["/usr/local/sbin/ocserv-container-entrypoint"]

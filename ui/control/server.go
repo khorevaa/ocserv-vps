@@ -174,7 +174,8 @@ func (s *controlServer) handle(connection *net.UnixConn) {
 		s.send(connection, failureResponse(nil, controlFailure(403, "peer_forbidden", "The peer is not authorized.")))
 		return
 	}
-	reader := bufio.NewReaderSize(connection, maxRequestBytes+1)
+	// LimitReader caps accumulation inside ReadBytes; the bufio size hint alone does not.
+	reader := bufio.NewReader(io.LimitReader(connection, maxRequestBytes+1))
 	line, err := reader.ReadBytes('\n')
 	if len(line) > maxRequestBytes {
 		s.send(connection, failureResponse(nil, controlFailure(413, "request_too_large", "The request is too large.")))

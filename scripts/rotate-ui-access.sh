@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Guard: this task script is sourced by the ocserv-vps entrypoint after
+# common.sh. Running it directly leaves die()/set -euo pipefail undefined,
+# which silently bypasses approval and safety gates. Refuse that.
+if [[ "$(type -t die)" != function ]]; then
+  printf '%s\n' 'Run this through the ocserv-vps entrypoint, not directly.' >&2
+  exit 1
+fi
+
 APPROVE_RESTART="0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,6 +47,10 @@ ACCESS_NEW_FILE="$(mktemp "${OCSERV_STACK_ROOT}/ui-secrets/access-secret.new.XXX
 ACCESS_REQUEST="$(mktemp /run/ocserv-vps-ui-access-request.XXXXXX)"
 HANDOFF_NEW="$(mktemp /root/ocserv-vps-ui-access.XXXXXX)"
 chmod 0600 "${ACCESS_BACKUP}" "${ACCESS_NEW_FILE}" "${ACCESS_REQUEST}" "${HANDOFF_NEW}"
+# Install a minimal cleanup trap before any secret is written to these files, so
+# an interrupt cannot leave a live access secret behind. It is upgraded to the
+# full rollback-aware on_exit handler below once the helpers are defined.
+trap 'rm -f "${ACCESS_BACKUP}" "${ACCESS_NEW_FILE}" "${ACCESS_REQUEST}" "${HANDOFF_NEW}"' EXIT HUP INT TERM
 cp "${ACCESS_FILE}" "${ACCESS_BACKUP}"
 OLD_SECRET="$(<"${ACCESS_FILE}")"
 NEW_SECRET="$(openssl rand -hex 32)"

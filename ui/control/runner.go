@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -38,9 +39,13 @@ func (r execRunner) Run(argv []string, stdin string) (string, error) {
 		command.Stdin = strings.NewReader(stdin)
 	}
 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 	command.Stdout = &limitedBuffer{buffer: &stdout, remaining: maxCommandOutputBytes + 1}
-	command.Stderr = &limitedBuffer{buffer: &bytes.Buffer{}, remaining: 64 * 1024}
+	command.Stderr = &limitedBuffer{buffer: &stderr, remaining: 64 * 1024}
 	if err := command.Run(); err != nil {
+		// The generic error returned to the peer intentionally hides backend detail;
+		// log it here so privileged failures are diagnosable server-side.
+		log.Printf("control backend command failed (argv0=%s): %v; stderr: %s", argv[0], err, strings.TrimSpace(stderr.String()))
 		if ctx.Err() != nil || errors.Is(err, exec.ErrNotFound) {
 			return "", backendUnavailable(err)
 		}
