@@ -281,7 +281,7 @@ update_manager() {
     trap 'rm -f "${installer}"' EXIT
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
       --output "${installer}" "https://raw.githubusercontent.com/${repository}/${tag}/install.sh"
-    OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" ${version:+"${version}"}
+    OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" "${tag}"
   )
 }
 

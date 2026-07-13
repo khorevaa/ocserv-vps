@@ -21,8 +21,13 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn("releases/latest", self.installer)
         self.assertIn("archive/refs/tags/${requested_version}.tar.gz", self.installer)
         self.assertIn("--proto '=https'", self.installer)
+        self.assertIn('archive_listing="${workdir}/archive.listing"', self.installer)
+        self.assertIn('tar -tvzf "${archive}" > "${archive_listing}"', self.installer)
+        self.assertNotIn('tar -tvzf "${archive}" |', self.installer)
         self.assertIn('command_path="${OCSERV_VPS_COMMAND_PATH:-/usr/local/bin/ocserv-vps}"', self.installer)
         self.assertIn('"${command_path}" install', self.installer)
+        self.assertIn('OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" "${tag}"', self.manager)
+        self.assertNotIn('${version:+"${version}"}', self.manager)
 
     def test_manager_covers_install_lifecycle_and_noninteractive_mode(self) -> None:
         for command in (

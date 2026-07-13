@@ -111,7 +111,10 @@ while IFS= read -r member; do
 done < <(tar -tzf "${archive}")
 # Reject symlink and hardlink members: their targets are not covered by the path
 # check above and `cp -a` would faithfully reproduce an escape link as root.
-if tar -tvzf "${archive}" | awk '{ print substr($1, 1, 1) }' | grep -qE '^[lh]$'; then
+archive_listing="${workdir}/archive.listing"
+tar -tvzf "${archive}" > "${archive_listing}"
+if awk 'substr($1, 1, 1) ~ /^[lh]$/ { found=1 } END { exit(found ? 0 : 1) }' \
+  "${archive_listing}"; then
   echo -e "${red}Release archive contains a symlink or hardlink; refusing to extract.${plain}" >&2
   exit 1
 fi

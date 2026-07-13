@@ -630,7 +630,7 @@ output = Path(sys.argv[2])
 output_stat = output.lstat()
 if (
     not stat.S_ISREG(output_stat.st_mode)
-    or output_stat.st_uid != 0
+    or output_stat.st_uid != os.geteuid()
     or stat.S_IMODE(output_stat.st_mode) != 0o600
     or output_stat.st_nlink != 1
 ):
@@ -645,7 +645,7 @@ try:
     opened_stat = os.fstat(fd)
     if (
         not stat.S_ISREG(opened_stat.st_mode)
-        or opened_stat.st_uid != 0
+        or opened_stat.st_uid != os.geteuid()
         or stat.S_IMODE(opened_stat.st_mode) != 0o600
         or opened_stat.st_nlink != 1
         or (opened_stat.st_dev, opened_stat.st_ino)
