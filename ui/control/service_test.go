@@ -112,6 +112,7 @@ func testService(t *testing.T) (*controlService, *fakeRunner, config) {
 	cfg.OCCTLSocket = filepath.Join(root, "occtl.sock")
 	cfg.OperationLock = filepath.Join(root, "locks", "operation.lock")
 	cfg.RestartTrigger = filepath.Join(root, "actions", "restart-ocserv")
+	cfg.CertRenewTrigger = filepath.Join(root, "actions", "renew-certificate")
 	if err := os.MkdirAll(filepath.Dir(cfg.RestartTrigger), 0o770); err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +180,21 @@ func TestRestartServiceCreatesOnlyFixedHostTrigger(t *testing.T) {
 	}
 }
 
+func TestCertificateRenewalCreatesOnlyFixedHostTrigger(t *testing.T) {
+	service, runner, cfg := testService(t)
+	result, err := service.renewCertificate()
+	if err != nil || result["renewal_requested"] != true {
+		t.Fatalf("certificate renewal request failed: %#v %v", result, err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("certificate renewal unexpectedly executed a command: %#v", runner.calls)
+	}
+	info, err := os.Lstat(cfg.CertRenewTrigger)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o640 {
+		t.Fatalf("certificate renewal trigger is unsafe: %#v %v", info, err)
+	}
+}
+
 func TestOverviewAndUsersAreAllowlisted(t *testing.T) {
 	service, _, _ := testService(t)
 	overview, err := service.overview()
@@ -217,6 +233,10 @@ func TestAddUserReturnsOneTimePasswordAndConflicts(t *testing.T) {
 	if result["username"] != "bob" || len(password) < 32 {
 		t.Fatalf("unexpected result: %#v", result)
 	}
+	connection := result["connection"].(map[string]any)
+	if connection["server"] != "https://vpn.example.com:443/" || connection["protocol"] != "anyconnect" || !strings.Contains(connection["text"].(string), password) {
+		t.Fatalf("unexpected connection profile: %#v", connection)
+	}
 	content, _ := os.ReadFile(cfg.PasswordPath)
 	if !strings.Contains(string(content), "bob:*:newhash") {
 		t.Fatal("password file was not updated")
@@ -228,6 +248,78 @@ func TestAddUserReturnsOneTimePasswordAndConflicts(t *testing.T) {
 	}
 	_, err = service.addUser("bob")
 	assertControlError(t, err, 409, "user_exists")
+}
+
+func TestUserBackupExportAndMergeImportPreserveHashes(t *testing.T) {
+	service, runner, cfg := testService(t)
+	service.now = func() time.Time { return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC) }
+	exported, err := service.exportUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.Format != userBackupFormat || exported.Version != 1 || exported.ExportedAt != "2026-07-13T12:00:00Z" || len(exported.Users) != 1 || exported.Users[0].PasswordHash != "oldhash" {
+		t.Fatalf("unexpected export: %#v", exported)
+	}
+	backup := map[string]any{
+		"format": userBackupFormat, "version": json.Number("1"), "exported_at": "2026-07-13T12:00:00Z",
+		"users": []any{
+			map[string]any{"username": "alice", "group": "*", "password_hash": "newhash"},
+			map[string]any{"username": "bob", "group": "staff", "password_hash": "$6$salt$hash"},
+		},
+	}
+	result, err := service.importUsers(backup, "merge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["created"] != 1 || result["updated"] != 1 || result["removed"] != 0 || result["total"] != 2 || result["sessions_terminated"] != true {
+		t.Fatalf("unexpected import result: %#v", result)
+	}
+	content, _ := os.ReadFile(cfg.PasswordPath)
+	if string(content) != "alice:*:newhash\nbob:staff:$6$salt$hash\n" {
+		t.Fatalf("unexpected imported database: %q", content)
+	}
+	if !hasRunnerCall(runner.calls, []string{"reload"}) || !hasRunnerCall(runner.calls, []string{"terminate", "user", "alice"}) {
+		t.Fatalf("missing reload or termination: %#v", runner.calls)
+	}
+}
+
+func TestReplaceImportRemovesMissingUsersAndInvalidBackupIsRejected(t *testing.T) {
+	service, _, cfg := testService(t)
+	backup := map[string]any{
+		"format": userBackupFormat, "version": json.Number("1"), "exported_at": "2026-07-13T12:00:00Z",
+		"users": []any{map[string]any{"username": "bob", "group": "*", "password_hash": "hash"}},
+	}
+	result, err := service.importUsers(backup, "replace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["created"] != 1 || result["removed"] != 1 || result["total"] != 1 {
+		t.Fatalf("unexpected replace result: %#v", result)
+	}
+	content, _ := os.ReadFile(cfg.PasswordPath)
+	if string(content) != "bob:*:hash\n" {
+		t.Fatalf("unexpected replacement database: %q", content)
+	}
+	backup["users"] = []any{
+		map[string]any{"username": "../bad", "group": "*", "password_hash": "hash"},
+	}
+	_, err = service.importUsers(backup, "merge")
+	assertControlError(t, err, 422, "invalid_backup")
+}
+
+func TestUserImportReloadFailureRollsBack(t *testing.T) {
+	service, runner, cfg := testService(t)
+	original, _ := os.ReadFile(cfg.PasswordPath)
+	runner.failReload = true
+	backup := map[string]any{
+		"format": userBackupFormat, "version": json.Number("1"), "exported_at": "2026-07-13T12:00:00Z",
+		"users": []any{map[string]any{"username": "bob", "group": "*", "password_hash": "hash"}},
+	}
+	_, err := service.importUsers(backup, "merge")
+	if err == nil {
+		t.Fatal("expected import failure")
+	}
+	assertPasswordRestored(t, cfg, original)
 }
 
 func TestRotateMissingUserReturns404WithoutBackendCall(t *testing.T) {
@@ -351,7 +443,7 @@ func TestCertificateValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "vpn.example.com"},
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "R10", Organization: []string{"Let's Encrypt"}},
 		DNSNames: []string{"vpn.example.com"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(48 * time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
@@ -364,7 +456,7 @@ func TestCertificateValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	info := service.certificateInfo("vpn.example.com")
-	if info["valid"] != true || info["days_remaining"] != 2 {
+	if info["valid"] != true || info["days_remaining"] != 2 || info["issuer"] != "Let's Encrypt (R10)" {
 		t.Fatalf("unexpected certificate info: %#v", info)
 	}
 	if service.certificateInfo("wrong.example.com")["valid"] != false {
@@ -390,4 +482,13 @@ func assertPasswordRestored(t *testing.T, cfg config, original []byte) {
 	if len(backups) != 0 {
 		t.Fatalf("backup artifacts remain: %#v", backups)
 	}
+}
+
+func hasRunnerCall(calls [][]string, command []string) bool {
+	for _, call := range calls {
+		if len(call) >= 4 && reflect.DeepEqual(call[4:], command) {
+			return true
+		}
+	}
+	return false
 }

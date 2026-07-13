@@ -22,7 +22,7 @@ import (
 	"unicode/utf8"
 )
 
-const maxRequestBytes = 64 * 1024
+const maxRequestBytes = 1024 * 1024
 
 type protocolError struct {
 	Status  int    `json:"status"`

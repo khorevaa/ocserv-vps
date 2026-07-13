@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,8 @@ type config struct {
 	VPNDomain             string
 	AllowedOrigin         string
 	AllowedHost           string
+	UILocalPort           int
+	SSHPort               int
 	SessionTTLSeconds     int64
 	AuditRetentionSeconds int64
 	AuditMaxRows          int
@@ -65,6 +68,20 @@ func loadConfig() (config, error) {
 	if strings.ContainsAny(result.AllowedHost, "/?#@") {
 		return result, fmt.Errorf("invalid allowed origin")
 	}
+	_, localPort, err := net.SplitHostPort(result.AllowedHost)
+	if err != nil {
+		return result, fmt.Errorf("allowed origin must include a valid local port")
+	}
+	parsedLocalPort, err := strconv.Atoi(localPort)
+	if err != nil || parsedLocalPort < 1 || parsedLocalPort > 65535 {
+		return result, fmt.Errorf("allowed origin must include a valid local port")
+	}
+	result.UILocalPort = parsedLocalPort
+	sshPort, err := envInt64("OCSERV_UI_SSH_PORT", 22, 1, 65535)
+	if err != nil {
+		return result, err
+	}
+	result.SSHPort = int(sshPort)
 	result.SessionTTLSeconds, err = envInt64("OCSERV_UI_SESSION_TTL", 12*60*60, 60, 7*24*60*60)
 	if err != nil {
 		return result, err
@@ -83,7 +100,7 @@ func loadConfig() (config, error) {
 		return result, err
 	}
 	result.ControlTimeoutSeconds = int(controlTimeout)
-	result.MaxRequestBytes, err = envInt64("OCSERV_UI_MAX_REQUEST_BYTES", 16*1024, 1024, 1024*1024)
+	result.MaxRequestBytes, err = envInt64("OCSERV_UI_MAX_REQUEST_BYTES", 1024*1024, 1024, 1024*1024)
 	if err != nil {
 		return result, err
 	}

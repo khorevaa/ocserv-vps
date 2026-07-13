@@ -8,7 +8,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_root
-for command in awk curl docker getent id nologin stat systemctl; do require_command "${command}"; done
+for command in awk cmp curl docker getent id nologin stat systemctl; do require_command "${command}"; done
 [[ -x "${OCSERV_UI_HOST_SHELL}" ]] || die "Required nologin shell is unavailable: ${OCSERV_UI_HOST_SHELL}"
 [[ -f "${OCSERV_UI_COMPOSE_FILE}" && ! -L "${OCSERV_UI_COMPOSE_FILE}" && \
    -f "${OCSERV_UI_ENV_FILE}" && ! -L "${OCSERV_UI_ENV_FILE}" ]] || \
@@ -83,6 +83,18 @@ for unit in "${OCSERV_UI_RESTART_PATH_UNIT}" "${OCSERV_UI_RESTART_SERVICE_UNIT}"
 done
 systemctl is-active --quiet ocserv-vps-restart.path || die 'The fixed ocserv restart path unit is not active.'
 printf '%s\n' 'Restart bridge: fixed host-side action, active; Docker socket is not mounted'
+for unit in "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}"; do
+  [[ -f "${unit}" && ! -L "${unit}" && "$(stat -c '%u:%g %a' "${unit}")" == '0:0 644' ]] || \
+    die "The fixed certificate renewal unit is missing or unsafe: ${unit}"
+done
+for script in "${OCSERV_UI_CERT_RENEW_SCRIPT}" "${OCSERV_UI_CERT_SYNC_SCRIPT}" "${OCSERV_UI_CERT_DEPLOY_HOOK}"; do
+  [[ -f "${script}" && ! -L "${script}" && "$(stat -c '%u:%g %a' "${script}")" == '0:0 750' ]] || \
+    die "The certificate renewal helper is missing or unsafe: ${script}"
+done
+systemctl is-active --quiet ocserv-vps-certificate-renew.path || die 'The certificate renewal path unit is not active.'
+cmp --silent "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "${OCSERV_UI_PUBLIC_DIR}/fullchain.pem" || \
+  die 'The UI certificate copy is not synchronized with the active certificate.'
+printf '%s\n' 'Certificate renewal bridge: fixed host-side action, active; control container remains networkless'
 curl --noproxy '*' --unix-socket "${OCSERV_UI_WEB_SOCKET}" \
   --header "Host: ${UI_LOCAL_HOST}:${UI_PORT}" --fail --silent --show-error \
   "http://${UI_LOCAL_HOST}:${UI_PORT}/api/v1/health"
@@ -112,7 +124,7 @@ if command -v ip6tables >/dev/null 2>&1 && ip6tables -w -S OCSERV_UI_INPUT >/dev
   die 'Legacy IPv6 UI ingress chain still exists.'
 fi
 printf '%s\n' 'Remote UI ingress: none (network_mode=none, no port bindings, no nginx/firewall UI assets)'
-printf '%s\n' 'ACME/nginx/firewall state: intentionally unmanaged by the UI installer'
+printf '%s\n' 'ACME renewal bridge: managed; nginx and firewall ingress remain unchanged by the UI installer'
 
 printf '\n%s\n' '=== Credential handoff ==='
 printf 'Root access-info command: %s\n' "${OCSERV_UI_ACCESS_INFO_SCRIPT}"

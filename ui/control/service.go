@@ -28,6 +28,10 @@ const (
 	maxCertificateBytes  = 1024 * 1024
 	maxJournalBytes      = 8 * 1024 * 1024
 	maxJournalRows       = 500
+	maxUserBackupBytes   = 512 * 1024
+	maxUserBackupRecords = 4096
+	userBackupFormat     = "ocserv-vps-users"
+	userBackupVersion    = 1
 )
 
 var (
@@ -42,6 +46,19 @@ type controlService struct {
 	config config
 	runner commandRunner
 	now    func() time.Time
+}
+
+type userBackupRecord struct {
+	Username     string `json:"username"`
+	Group        string `json:"group"`
+	PasswordHash string `json:"password_hash"`
+}
+
+type userBackup struct {
+	Format     string             `json:"format"`
+	Version    int                `json:"version"`
+	ExportedAt string             `json:"exported_at"`
+	Users      []userBackupRecord `json:"users"`
 }
 
 func newControlService(cfg config, runner commandRunner) *controlService {
@@ -63,10 +80,13 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		"healthcheck":           {"request_id": true, "action": true},
 		"overview":              {"request_id": true, "action": true},
 		"list_users":            {"request_id": true, "action": true},
+		"export_users":          {"request_id": true, "action": true},
+		"import_users":          {"request_id": true, "action": true, "backup": true, "mode": true},
 		"list_connections":      {"request_id": true, "action": true},
 		"list_journal":          {"request_id": true, "action": true},
 		"disconnect_connection": {"request_id": true, "action": true, "id": true},
 		"restart_service":       {"request_id": true, "action": true},
+		"renew_certificate":     {"request_id": true, "action": true},
 		"add_user":              {"request_id": true, "action": true, "username": true},
 		"rotate_password":       {"request_id": true, "action": true, "username": true, "terminate_sessions": true},
 	}
@@ -86,6 +106,18 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		return s.overview()
 	case "list_users":
 		return s.listUsers()
+	case "export_users":
+		return s.exportUsers()
+	case "import_users":
+		mode, modeOK := request["mode"].(string)
+		backup, backupOK := request["backup"]
+		if !modeOK || (mode != "merge" && mode != "replace") {
+			return nil, controlFailure(400, "invalid_import_mode", "The user import mode is invalid.")
+		}
+		if !backupOK {
+			return nil, controlFailure(422, "invalid_backup", "The user backup is missing.")
+		}
+		return s.importUsers(backup, mode)
 	case "list_connections":
 		return s.listConnections()
 	case "list_journal":
@@ -98,6 +130,8 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		return s.disconnectConnection(id)
 	case "restart_service":
 		return s.restartService()
+	case "renew_certificate":
+		return s.renewCertificate()
 	}
 	username, ok := request["username"].(string)
 	if !ok || !usernamePattern.MatchString(username) {
@@ -118,27 +152,41 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 }
 
 func (s *controlService) restartService() (map[string]any, error) {
-	lock, err := acquireFileLock(s.config.OperationLock)
-	if err != nil {
+	if err := s.createHostTrigger(s.config.RestartTrigger, "restart_unavailable", "The ocserv restart bridge is unavailable."); err != nil {
 		return nil, err
 	}
+	return map[string]any{"restarting": true}, nil
+}
+
+func (s *controlService) renewCertificate() (map[string]any, error) {
+	if err := s.createHostTrigger(s.config.CertRenewTrigger, "certificate_renewal_unavailable", "The certificate renewal bridge is unavailable."); err != nil {
+		return nil, err
+	}
+	return map[string]any{"renewal_requested": true}, nil
+}
+
+func (s *controlService) createHostTrigger(path, errorCode, errorMessage string) error {
+	lock, err := acquireFileLock(s.config.OperationLock)
+	if err != nil {
+		return err
+	}
 	defer lock.Close()
-	file, err := os.OpenFile(s.config.RestartTrigger, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
 	if errors.Is(err, os.ErrExist) {
-		info, statErr := os.Lstat(s.config.RestartTrigger)
-		if statErr != nil || !info.Mode().IsRegular() {
-			return nil, controlFailure(500, "restart_unavailable", "The ocserv restart bridge is unavailable.")
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o640 {
+			return controlFailure(500, errorCode, errorMessage)
 		}
-		return map[string]any{"restarting": true}, nil
+		return nil
 	}
 	if err != nil {
-		return nil, controlFailure(500, "restart_unavailable", "The ocserv restart bridge is unavailable.")
+		return controlFailure(500, errorCode, errorMessage)
 	}
 	if err = file.Close(); err != nil {
-		_ = os.Remove(s.config.RestartTrigger)
-		return nil, controlFailure(500, "restart_unavailable", "The ocserv restart request could not be committed.")
+		_ = os.Remove(path)
+		return controlFailure(500, errorCode, errorMessage)
 	}
-	return map[string]any{"restarting": true}, nil
+	return nil
 }
 
 func (s *controlService) listConnections() (map[string]any, error) {
@@ -280,6 +328,127 @@ func (s *controlService) listUsers() (map[string]any, error) {
 	return map[string]any{"users": users, "total": len(users)}, nil
 }
 
+func (s *controlService) exportUsers() (userBackup, error) {
+	lock, err := acquireFileLock(s.config.OperationLock)
+	if err != nil {
+		return userBackup{}, err
+	}
+	defer lock.Close()
+	records, err := s.readPasswordRecords()
+	if err != nil {
+		return userBackup{}, err
+	}
+	backup := userBackup{
+		Format:     userBackupFormat,
+		Version:    userBackupVersion,
+		ExportedAt: s.now().UTC().Format(time.RFC3339),
+		Users:      records,
+	}
+	encoded, err := json.Marshal(backup)
+	if err != nil || len(encoded) > maxUserBackupBytes {
+		return userBackup{}, controlFailure(422, "backup_too_large", "The user backup is too large to export safely.")
+	}
+	return backup, nil
+}
+
+func (s *controlService) importUsers(raw any, mode string) (map[string]any, error) {
+	backup, err := parseUserBackup(raw)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := acquireFileLock(s.config.OperationLock)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	current, err := s.readPasswordRecords()
+	if err != nil {
+		return nil, err
+	}
+	currentByName := make(map[string]userBackupRecord, len(current))
+	for _, record := range current {
+		currentByName[record.Username] = record
+	}
+	finalByName := map[string]userBackupRecord{}
+	if mode == "merge" {
+		for username, record := range currentByName {
+			finalByName[username] = record
+		}
+	}
+	created, updated, unchanged := 0, 0, 0
+	affected := map[string]bool{}
+	for _, record := range backup.Users {
+		previous, exists := currentByName[record.Username]
+		switch {
+		case !exists:
+			created++
+		case previous != record:
+			updated++
+			affected[record.Username] = true
+		default:
+			unchanged++
+		}
+		finalByName[record.Username] = record
+	}
+	removed := 0
+	if mode == "replace" {
+		for username := range currentByName {
+			if _, retained := finalByName[username]; !retained {
+				removed++
+				affected[username] = true
+			}
+		}
+	}
+	final := make([]userBackupRecord, 0, len(finalByName))
+	for _, record := range finalByName {
+		final = append(final, record)
+	}
+	sortUserBackupRecords(final)
+	changed := !sameUserBackupRecords(current, final)
+	sessionsTerminated := true
+	if changed {
+		snapshot, snapshotErr := capturePasswordSnapshot(s.config.PasswordPath)
+		if snapshotErr != nil {
+			return nil, snapshotErr
+		}
+		mutationErr := func() error {
+			if writeErr := writePasswordRecords(s.config.PasswordPath, final); writeErr != nil {
+				return writeErr
+			}
+			verified, readErr := s.readPasswordRecords()
+			if readErr != nil || !sameUserBackupRecords(verified, final) {
+				return controlFailure(503, "backend_error", "The imported password database could not be verified.")
+			}
+			_, reloadErr := s.runOCCTL("reload")
+			return reloadErr
+		}()
+		if mutationErr != nil {
+			if rollbackErr := snapshot.Rollback(); rollbackErr != nil {
+				return nil, controlFailure(500, "rollback_failed", "The password database could not be restored safely.")
+			}
+			_, _ = s.runOCCTL("reload")
+			return nil, mutationErr
+		}
+		if commitErr := snapshot.Commit(); commitErr != nil {
+			return nil, controlFailure(500, "snapshot_cleanup_failed", "The password snapshot could not be removed safely.")
+		}
+		for username := range affected {
+			if _, terminateErr := s.runOCCTL("terminate", "user", username); terminateErr != nil {
+				sessionsTerminated = false
+			}
+		}
+	}
+	result := map[string]any{
+		"mode": mode, "imported": len(backup.Users), "created": created,
+		"updated": updated, "unchanged": unchanged, "removed": removed,
+		"total": len(final), "sessions_terminated": sessionsTerminated,
+	}
+	if !sessionsTerminated {
+		result["warning"] = "session_termination_failed"
+	}
+	return result, nil
+}
+
 func (s *controlService) addUser(username string) (map[string]any, error) {
 	lock, err := acquireFileLock(s.config.OperationLock)
 	if err != nil {
@@ -329,6 +498,10 @@ func (s *controlService) changePassword(username string) (map[string]any, error)
 	if err != nil {
 		return nil, controlFailure(500, "random_failed", "A secure password could not be generated.")
 	}
+	connection, err := s.connectionProfile(username, password)
+	if err != nil {
+		return nil, err
+	}
 	snapshot, err := capturePasswordSnapshot(s.config.PasswordPath)
 	if err != nil {
 		return nil, err
@@ -361,7 +534,28 @@ func (s *controlService) changePassword(username string) (map[string]any, error)
 	if err = snapshot.Commit(); err != nil {
 		return nil, controlFailure(500, "snapshot_cleanup_failed", "The password snapshot could not be removed safely.")
 	}
-	return map[string]any{"username": username, "password": password}, nil
+	return map[string]any{"username": username, "password": password, "connection": connection}, nil
+}
+
+func (s *controlService) connectionProfile(username, password string) (map[string]any, error) {
+	state, err := s.readState()
+	if err != nil {
+		return nil, err
+	}
+	domain, domainOK := safeDomain(state["domain"]).(string)
+	port, portOK := safePort(state["vpn_port"]).(int)
+	if !domainOK || !portOK {
+		return nil, controlFailure(500, "invalid_state", "The managed VPN endpoint is unavailable.")
+	}
+	server := fmt.Sprintf("https://%s:%d/", domain, port)
+	profileText := fmt.Sprintf(
+		"# ocserv-vps connection profile\nserver=%s\nprotocol=anyconnect\nusername=%s\npassword=%s\n\n# OpenConnect CLI (the password will be requested)\nopenconnect --protocol=anyconnect --user=%s %s\n",
+		server, username, password, username, server,
+	)
+	return map[string]any{
+		"server": server, "host": domain, "port": port, "protocol": "anyconnect",
+		"username": username, "password": password, "text": profileText,
+	}, nil
 }
 
 func (s *controlService) runOCCTL(arguments ...string) (string, error) {
@@ -411,39 +605,182 @@ func (s *controlService) readState() (map[string]string, error) {
 }
 
 func (s *controlService) readUsernames() ([]string, error) {
+	records, err := s.readPasswordRecords()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(records))
+	for _, record := range records {
+		result = append(result, record.Username)
+	}
+	return result, nil
+}
+
+func (s *controlService) readPasswordRecords() ([]userBackupRecord, error) {
 	content, missing, err := readRegularFile(s.config.PasswordPath, maxPasswordFileBytes)
 	if missing {
-		return []string{}, nil
+		return []userBackupRecord{}, nil
 	}
 	if err != nil {
 		return nil, controlFailure(500, "invalid_password_file", "The password database is unreadable.")
 	}
+	records := make([]userBackupRecord, 0)
 	unique := map[string]bool{}
 	for _, line := range strings.Split(string(content), "\n") {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		username, _, _ := strings.Cut(line, ":")
-		if usernamePattern.MatchString(username) {
-			unique[username] = true
+		username, rest, first := strings.Cut(line, ":")
+		group, passwordHash, second := strings.Cut(rest, ":")
+		record := userBackupRecord{Username: username, Group: group, PasswordHash: passwordHash}
+		if !first || !second || strings.Contains(passwordHash, ":") || !validUserBackupRecord(record) || unique[username] {
+			return nil, controlFailure(500, "invalid_password_file", "The password database contains an invalid user record.")
 		}
+		unique[username] = true
+		records = append(records, record)
 	}
-	result := make([]string, 0, len(unique))
-	for username := range unique {
-		result = append(result, username)
+	if len(records) > maxUserBackupRecords {
+		return nil, controlFailure(422, "backup_too_large", "The password database contains too many users to export safely.")
 	}
-	sort.Slice(result, func(i, j int) bool {
-		left, right := strings.ToLower(result[i]), strings.ToLower(result[j])
+	sortUserBackupRecords(records)
+	return records, nil
+}
+
+func sortUserBackupRecords(records []userBackupRecord) {
+	sort.Slice(records, func(i, j int) bool {
+		left, right := strings.ToLower(records[i].Username), strings.ToLower(records[j].Username)
 		if left == right {
-			return result[i] < result[j]
+			return records[i].Username < records[j].Username
 		}
 		return left < right
 	})
-	return result, nil
+}
+
+func validUserBackupField(value string, allowEmpty bool, maximum int) bool {
+	if (!allowEmpty && value == "") || len(value) > maximum {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if character < 33 || character > 126 || character == ':' {
+			return false
+		}
+	}
+	return true
+}
+
+func validUserBackupRecord(record userBackupRecord) bool {
+	return usernamePattern.MatchString(record.Username) &&
+		validUserBackupField(record.Group, true, 256) &&
+		validUserBackupField(record.PasswordHash, false, 2048)
+}
+
+func exactBackupVersion(value any) bool {
+	switch version := value.(type) {
+	case json.Number:
+		parsed, err := strconv.Atoi(string(version))
+		return err == nil && parsed == userBackupVersion
+	case float64:
+		return version == userBackupVersion
+	case int:
+		return version == userBackupVersion
+	}
+	return false
+}
+
+func parseUserBackup(raw any) (userBackup, error) {
+	object, ok := raw.(map[string]any)
+	if !ok || len(object) != 4 {
+		return userBackup{}, controlFailure(422, "invalid_backup", "The user backup has an invalid structure.")
+	}
+	for _, key := range []string{"format", "version", "exported_at", "users"} {
+		if _, exists := object[key]; !exists {
+			return userBackup{}, controlFailure(422, "invalid_backup", "The user backup has an invalid structure.")
+		}
+	}
+	format, formatOK := object["format"].(string)
+	exportedAt, exportedOK := object["exported_at"].(string)
+	rows, rowsOK := object["users"].([]any)
+	if !formatOK || format != userBackupFormat || !exactBackupVersion(object["version"]) || !exportedOK || !rowsOK {
+		return userBackup{}, controlFailure(422, "invalid_backup", "The user backup format or version is unsupported.")
+	}
+	parsedAt, err := time.Parse(time.RFC3339, exportedAt)
+	if err != nil || parsedAt.UTC().Format(time.RFC3339) != exportedAt {
+		return userBackup{}, controlFailure(422, "invalid_backup", "The user backup timestamp is invalid.")
+	}
+	if len(rows) > maxUserBackupRecords {
+		return userBackup{}, controlFailure(422, "backup_too_large", "The user backup contains too many records.")
+	}
+	records := make([]userBackupRecord, 0, len(rows))
+	unique := map[string]bool{}
+	for _, row := range rows {
+		fields, valid := row.(map[string]any)
+		if !valid || len(fields) != 3 {
+			return userBackup{}, controlFailure(422, "invalid_backup", "The user backup contains an invalid record.")
+		}
+		username, usernameOK := fields["username"].(string)
+		group, groupOK := fields["group"].(string)
+		passwordHash, hashOK := fields["password_hash"].(string)
+		record := userBackupRecord{Username: username, Group: group, PasswordHash: passwordHash}
+		if !usernameOK || !groupOK || !hashOK || !validUserBackupRecord(record) || unique[username] {
+			return userBackup{}, controlFailure(422, "invalid_backup", "The user backup contains an invalid or duplicate record.")
+		}
+		unique[username] = true
+		records = append(records, record)
+	}
+	backup := userBackup{Format: format, Version: userBackupVersion, ExportedAt: exportedAt, Users: records}
+	encoded, err := json.Marshal(backup)
+	if err != nil || len(encoded) > maxUserBackupBytes {
+		return userBackup{}, controlFailure(422, "backup_too_large", "The user backup is too large to import safely.")
+	}
+	sortUserBackupRecords(backup.Users)
+	return backup, nil
+}
+
+func sameUserBackupRecords(left, right []userBackupRecord) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func writePasswordRecords(path string, records []userBackupRecord) error {
+	var content strings.Builder
+	for _, record := range records {
+		if !validUserBackupRecord(record) {
+			return controlFailure(422, "invalid_backup", "The user backup contains an invalid record.")
+		}
+		fmt.Fprintf(&content, "%s:%s:%s\n", record.Username, record.Group, record.PasswordHash)
+	}
+	if content.Len() > maxUserBackupBytes {
+		return controlFailure(422, "backup_too_large", "The user backup is too large to import safely.")
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return controlFailure(503, "backend_error", "The password database could not be opened for import.")
+	}
+	writeErr := func() error {
+		if _, err = io.WriteString(file, content.String()); err != nil {
+			return err
+		}
+		if err = file.Sync(); err != nil {
+			return err
+		}
+		return file.Chmod(0o600)
+	}()
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		return controlFailure(503, "backend_error", "The password database import could not be committed.")
+	}
+	return nil
 }
 
 func (s *controlService) certificateInfo(domain any) map[string]any {
-	empty := map[string]any{"expires_at": nil, "days_remaining": nil, "valid": false}
+	empty := map[string]any{"expires_at": nil, "days_remaining": nil, "issuer": nil, "valid": false}
 	domainName, ok := domain.(string)
 	if !ok {
 		return empty
@@ -466,7 +803,38 @@ func (s *controlService) certificateInfo(domain any) map[string]any {
 	return map[string]any{
 		"expires_at":     certificate.NotAfter.UTC().Truncate(time.Second).Format(time.RFC3339),
 		"days_remaining": remainingDays,
+		"issuer":         certificateIssuer(certificate),
 		"valid":          valid,
+	}
+}
+
+func certificateIssuer(certificate *x509.Certificate) any {
+	clean := func(value string) string {
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 128 {
+			return ""
+		}
+		for _, character := range value {
+			if unicode.IsControl(character) {
+				return ""
+			}
+		}
+		return strings.Join(strings.Fields(value), " ")
+	}
+	organization := ""
+	if len(certificate.Issuer.Organization) > 0 {
+		organization = clean(certificate.Issuer.Organization[0])
+	}
+	commonName := clean(certificate.Issuer.CommonName)
+	switch {
+	case organization != "" && commonName != "" && !strings.EqualFold(organization, commonName):
+		return organization + " (" + commonName + ")"
+	case organization != "":
+		return organization
+	case commonName != "":
+		return commonName
+	default:
+		return nil
 	}
 }
 

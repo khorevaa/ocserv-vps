@@ -838,9 +838,55 @@ svg {
 }
 
 .service-domain {
-  margin: 5px 0 0;
+  margin: 0;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.service-domain-row,
+.copy-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.service-domain-row {
+  margin-top: 5px;
+}
+
+.copy-icon-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.copy-icon-button:hover:not(:disabled) {
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-color: color-mix(in srgb, var(--blue) 25%, transparent);
+}
+
+.copy-icon-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.copy-icon-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .status-badge {
@@ -925,6 +971,27 @@ svg {
 
 .info-card--wide {
   grid-column: 1 / -1;
+}
+
+.card-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.copy-value {
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.command-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+  user-select: all;
 }
 
 .secret-mask {
@@ -1337,6 +1404,10 @@ tbody tr:hover {
   box-shadow: var(--shadow);
 }
 
+.modal--wide {
+  width: min(100%, 760px);
+}
+
 .modal-header {
   display: flex;
   align-items: flex-start;
@@ -1461,6 +1532,32 @@ tbody tr:hover {
   width: 100%;
   padding: 0 12px;
   font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+.config-output {
+  display: block;
+  width: 100%;
+  min-height: 210px;
+  resize: vertical;
+  padding: 12px;
+  color: var(--text-strong);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font: 13px/1.55 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+.config-output:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgb(8 126 229 / 14%);
+  outline: 0;
+}
+
+.credential-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 10px;
 }
 
 .toast-region {
@@ -1639,6 +1736,10 @@ tbody tr:hover {
   .page-header--users .button {
     width: 100%;
   }
+
+  .page-header--users .page-actions {
+    width: 100%;
+  }
 }
 
 @media (max-width: 520px) {
@@ -1681,6 +1782,14 @@ tbody tr:hover {
     gap: 3px;
   }
 
+  .copy-value {
+    justify-content: flex-start;
+  }
+
+  .card-footer-actions .button {
+    width: 100%;
+  }
+
   .card-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -1713,6 +1822,14 @@ tbody tr:hover {
   }
 
   .password-output .button {
+    width: 100%;
+  }
+
+  .credential-config-actions {
+    flex-direction: column;
+  }
+
+  .credential-config-actions .button {
     width: 100%;
   }
 

@@ -57,7 +57,7 @@ validate_registry_image "${CONTROL_IMAGE}"
 validate_port 'local tunnel port' "${UI_PORT}"
 validate_port 'SSH port' "${SSH_PORT}"
 for command in \
-  awk curl docker flock getent groupadd groupdel id nologin openssl passwd \
+  awk certbot curl docker flock getent groupadd groupdel id nologin openssl passwd \
   python3 stat systemctl systemd-tmpfiles useradd userdel; do
   require_command "${command}"
 done
@@ -75,6 +75,9 @@ for path in \
   "${UI_WEB_RUN_DIR}" "${UI_TMPFILES_FILE}" \
   "${OCSERV_UI_ACTION_TMPFILES_FILE}" \
   "${OCSERV_UI_RESTART_PATH_UNIT}" "${OCSERV_UI_RESTART_SERVICE_UNIT}" \
+  "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}" \
+  "${OCSERV_UI_CERT_RENEW_SCRIPT}" "${OCSERV_UI_CERT_SYNC_SCRIPT}" \
+  "${OCSERV_UI_CERT_DEPLOY_HOOK}" \
   "${OCSERV_UI_ACCESS_INFO_SCRIPT}" \
   "${UI_ACCESS_HANDOFF}" \
   "${LEGACY_UI_NGINX_SITE}" "${LEGACY_UI_NGINX_LINK}" \
@@ -240,9 +243,14 @@ rollback_ui() {
     identity_cleanup_safe=0
   fi
   systemctl disable --now ocserv-vps-restart.path >/dev/null 2>&1 || true
+  systemctl disable --now ocserv-vps-certificate-renew.path >/dev/null 2>&1 || true
+  systemctl stop ocserv-vps-certificate-renew.service >/dev/null 2>&1 || true
   if ! rm -f "${OCSERV_UI_RESTART_PATH_UNIT}" "${OCSERV_UI_RESTART_SERVICE_UNIT}" \
+      "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}" \
+      "${OCSERV_UI_CERT_RENEW_SCRIPT}" "${OCSERV_UI_CERT_SYNC_SCRIPT}" \
+      "${OCSERV_UI_CERT_DEPLOY_HOOK}" "${OCSERV_UI_CERT_RENEW_TRIGGER}" \
       "${OCSERV_UI_ACTION_TMPFILES_FILE}" "${OCSERV_UI_RESTART_TRIGGER}"; then
-    warn 'Rollback could not remove the ocserv restart bridge.'
+    warn 'Rollback could not remove all ocserv host action bridges.'
     rollback_failed=1
     identity_cleanup_safe=0
   fi
@@ -376,6 +384,7 @@ systemd-tmpfiles --create "${UI_TMPFILES_FILE}"
 [[ "$(stat -c '%u:%g %a' "${UI_WEB_RUN_DIR}")" == '10001:10001 700' ]] || \
   die 'The UI web runtime directory has unexpected ownership or permissions.'
 install_ocserv_restart_bridge
+install_certificate_renewal_bridge
 SESSION_KEY="$(openssl rand -hex 32)"
 ACCESS_SECRET="$(openssl rand -hex 32)"
 UI_LOCAL_HOST="ocserv-$(openssl rand -hex 16).localhost"
@@ -427,6 +436,7 @@ services:
       - no-new-privileges:true
     environment:
       OCSERV_UI_ALLOWED_UID: "10001"
+      OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}
       OCSERV_UI_CERTIFICATE_FILE: /opt/ocserv-vps/ui-public/fullchain.pem
       OCSERV_UI_STATE_FILE: /opt/ocserv-vps/ui-public/state
       OCSERV_UI_JOURNAL_FILE: /opt/ocserv-vps/logs/vpn-events.jsonl
@@ -465,6 +475,7 @@ services:
       OCSERV_UI_ALLOWED_ORIGIN: "http://${UI_LOCAL_HOST}:${UI_PORT}"
       OCSERV_UI_IMAGE_NAME: "${UI_IMAGE}"
       OCSERV_UI_VPN_DOMAIN: "${DOMAIN}"
+      OCSERV_UI_SSH_PORT: "${SSH_PORT}"
       OCSERV_UI_TRUSTED_PROXY_CIDRS: ""
       OCSERV_UI_JSON: /var/lib/ocserv-ui/state.json
       OCSERV_UI_CONTROL_SOCKET: /run/ocserv-ui/control.sock

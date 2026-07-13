@@ -17,6 +17,7 @@
     currentView: "overview",
     rotateUsername: "",
     disconnectID: 0,
+    pendingUserBackup: null,
     activeModal: null,
     lastFocused: null,
   };
@@ -137,6 +138,10 @@
         backend_unavailable: "Служба ocserv временно недоступна.",
         backend_error: "Служба ocserv отклонила операцию.",
         invalid_connection_id: "Подключение уже завершено или имеет некорректный идентификатор.",
+        invalid_backup: "Файл резервной копии пользователей повреждён или имеет неподдерживаемый формат.",
+        backup_too_large: "Файл резервной копии пользователей слишком большой.",
+        invalid_import_mode: "Выбран неподдерживаемый режим импорта пользователей.",
+        certificate_renewal_unavailable: "Служба перевыпуска сертификата недоступна.",
       }[payload.error];
       if (translated) return translated;
       const value = payload.message || payload.error || payload.detail;
@@ -203,6 +208,19 @@
     return payload;
   }
 
+  function downloadText(filename, text, contentType) {
+    const blob = new Blob([text], { type: contentType || "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   function setHidden(element, hidden) {
     element.classList.toggle("is-hidden", hidden);
   }
@@ -240,6 +258,28 @@
     state.connectionsLoaded = false;
     state.journalLoaded = false;
     state.overviewLoaded = false;
+    state.pendingUserBackup = null;
+  }
+
+  async function copyText(value) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    const helper = document.createElement("textarea");
+    helper.value = value;
+    helper.setAttribute("readonly", "");
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    let copied = false;
+    try {
+      helper.select();
+      copied = document.execCommand("copy");
+    } finally {
+      helper.remove();
+    }
+    if (!copied) throw new Error("copy command failed");
   }
 
   function applySession(payload) {
@@ -438,7 +478,9 @@
     serviceIcon.classList.toggle("is-online", online);
     serviceIcon.classList.toggle("is-offline", !online);
 
-    el("service-domain").textContent = textOrDash(vpn.domain);
+    const domain = typeof vpn.domain === "string" ? vpn.domain : "";
+    el("service-domain").textContent = textOrDash(domain);
+    el("copy-domain-button").disabled = !domain;
     if (typeof vpn.domain === "string" && vpn.domain) {
       el("topbar-title").textContent = vpn.domain;
       document.querySelector(".topbar-brand").setAttribute("aria-label", `${vpn.domain} — состояние системы`);
@@ -451,6 +493,7 @@
     el("vpn-port").textContent = textOrDash(vpn.port);
     el("vpn-network").textContent = textOrDash(vpn.network);
     el("certificate-expiry").textContent = formatDateTime(certificate.not_after);
+    el("certificate-issuer").textContent = textOrDash(certificate.issuer);
     el("openconnect-check").textContent = formatDateTime(data ? data.last_openconnect_check : null);
 
     const rawDays = Number(certificate.days_remaining);
@@ -486,6 +529,10 @@
     const access = data && typeof data.access_secret === "object" ? data.access_secret : {};
     el("ui-access-mask").textContent = access.masked || "••••••••••••••••";
     el("ui-access-state").textContent = access.configured ? "Секрет настроен" : "Нет данных";
+    el("copy-ui-secret-button").disabled = !access.configured;
+    const sshCommand = data && typeof data.ssh_command === "string" ? data.ssh_command : "";
+    el("ui-ssh-command").textContent = textOrDash(sshCommand);
+    el("copy-ssh-command-button").disabled = !sshCommand;
   }
 
   async function loadOverview(force = false) {
@@ -508,6 +555,79 @@
   }
 
   el("overview-refresh").addEventListener("click", () => loadOverview(true));
+
+  el("copy-domain-button").addEventListener("click", async () => {
+    const domain = el("service-domain").textContent;
+    if (!domain || domain === "—") return;
+    try {
+      await copyText(domain);
+      showToast("Доменное имя VPN скопировано", "success");
+    } catch (_error) {
+      showToast("Не удалось скопировать доменное имя.", "danger");
+    }
+  });
+
+  el("copy-ssh-command-button").addEventListener("click", async () => {
+    const command = el("ui-ssh-command").textContent;
+    if (!command || command === "—") return;
+    try {
+      await copyText(command);
+      showToast("SSH-команда скопирована", "success");
+    } catch (_error) {
+      showToast("Не удалось скопировать SSH-команду.", "danger");
+    }
+  });
+
+  el("copy-ui-secret-button").addEventListener("click", async () => {
+    const button = el("copy-ui-secret-button");
+    setBusy(button, true);
+    try {
+      const result = await apiRequest("/api/v1/ui/access-secret", { method: "POST" });
+      const secret = result && typeof result.access_secret === "string" ? result.access_secret : "";
+      if (!/^[A-Za-z0-9_-]{43,256}$/.test(secret)) throw new Error("Сервер не вернул секрет доступа.");
+      await copyText(secret);
+      showToast("Секрет доступа скопирован", "success");
+    } catch (error) {
+      if (!handleUnauthorized(error)) showToast(error.message || "Не удалось скопировать секрет доступа.", "danger");
+    } finally {
+      setBusy(button, false);
+    }
+  });
+
+  el("renew-certificate-button").addEventListener("click", async () => {
+    if (!window.confirm("Принудительно перевыпустить сертификат TLS через Let's Encrypt?")) return;
+    const button = el("renew-certificate-button");
+    const previousExpiry = el("certificate-expiry").textContent;
+    clearInlineError(el("overview-error"));
+    setBusy(button, true);
+    try {
+      const result = await apiRequest("/api/v1/certificate/renew", { method: "POST" });
+      if (!result || result.renewal_requested !== true) throw new Error("Сервер не подтвердил запрос перевыпуска.");
+      showToast("Запрос на перевыпуск сертификата отправлен");
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        try {
+          const overview = await apiRequest("/api/v1/overview");
+          renderOverview(overview || {});
+          const nextExpiry = el("certificate-expiry").textContent;
+          if (nextExpiry !== "—" && nextExpiry !== previousExpiry) {
+            state.overviewLoaded = true;
+            showToast("Сертификат TLS перевыпущен", "success");
+            return;
+          }
+        } catch (error) {
+          if (handleUnauthorized(error)) return;
+          /* ocserv may be reloading after certificate renewal */
+        }
+      }
+      state.overviewLoaded = false;
+      showToast("Новый сертификат не появился за 60 секунд. Проверьте состояние службы перевыпуска на VPS.", "danger");
+    } catch (error) {
+      if (!handleUnauthorized(error)) showInlineError(el("overview-error"), error.message || "Не удалось запросить перевыпуск сертификата.");
+    } finally {
+      setBusy(button, false);
+    }
+  });
 
   el("restart-service-button").addEventListener("click", () => {
     clearInlineError(el("restart-error"));
@@ -806,7 +926,14 @@
     if (state.activeModal.id === "credential-modal" && !force) return;
     if (state.activeModal.id === "credential-modal") {
       el("credential-password").value = "";
+      el("credential-config").value = "";
       el("credential-username").textContent = "—";
+    }
+    if (state.activeModal.id === "import-users-modal") {
+      state.pendingUserBackup = null;
+      el("import-users-form").reset();
+      el("import-users-file-name").textContent = "—";
+      el("import-users-count").textContent = "0";
     }
     document.querySelectorAll(".modal").forEach((modal) => setHidden(modal, true));
     setHidden(modalBackdrop, true);
@@ -894,7 +1021,7 @@
     if (event.key === "Escape") {
       if (state.activeModal.id === "credential-modal") {
         event.preventDefault();
-        showToast("Сначала сохраните одноразовый пароль.");
+        showToast("Сначала сохраните одноразовые данные подключения.");
       } else {
         closeModal();
       }
@@ -902,7 +1029,7 @@
     }
     if (event.key !== "Tab") return;
     const focusable = Array.from(state.activeModal.querySelectorAll(
-      "button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex='-1'])"
+      "button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex='-1'])"
     )).filter((item) => item.offsetParent !== null);
     if (!focusable.length) return;
     const first = focusable[0];
@@ -913,6 +1040,84 @@
     } else if (!event.shiftKey && document.activeElement === last) {
       event.preventDefault();
       first.focus();
+    }
+  });
+
+  el("export-users-button").addEventListener("click", async () => {
+    if (!window.confirm("Экспорт содержит хеши паролей. Сохранить чувствительный файл резервной копии пользователей?")) return;
+    const button = el("export-users-button");
+    clearInlineError(el("users-error"));
+    setBusy(button, true);
+    try {
+      const backup = await apiRequest("/api/v1/users/export", { method: "POST" });
+      if (!backup || backup.format !== "ocserv-vps-users" || backup.version !== 1 || !Array.isArray(backup.users)) {
+        throw new ApiError("Сервер вернул некорректную резервную копию пользователей.", 0, backup);
+      }
+      const date = new Date().toISOString().slice(0, 10);
+      downloadText(`ocserv-vps-users-${date}.json`, `${JSON.stringify(backup, null, 2)}\n`, "application/json;charset=utf-8");
+      showToast(`Экспортировано пользователей: ${backup.users.length}`, "success");
+    } catch (error) {
+      if (!handleUnauthorized(error)) showInlineError(el("users-error"), error.message || "Не удалось экспортировать пользователей.");
+    } finally {
+      setBusy(button, false);
+    }
+  });
+
+  el("import-users-button").addEventListener("click", () => {
+    el("users-import-file").click();
+  });
+
+  el("users-import-file").addEventListener("change", async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    clearInlineError(el("users-error"));
+    try {
+      if (file.size > 512 * 1024) {
+        throw new Error("Файл резервной копии превышает 512 КиБ.");
+      }
+      const backup = JSON.parse(await file.text());
+      if (!backup || backup.format !== "ocserv-vps-users" || backup.version !== 1 || !Array.isArray(backup.users)) {
+        throw new Error("Выбран файл неподдерживаемого формата.");
+      }
+      state.pendingUserBackup = backup;
+      el("import-users-file-name").textContent = file.name;
+      el("import-users-count").textContent = String(backup.users.length);
+      el("replace-users").checked = false;
+      clearInlineError(el("import-users-error"));
+      openModal("import-users-modal");
+    } catch (error) {
+      showInlineError(el("users-error"), error.message || "Не удалось прочитать файл резервной копии.");
+    }
+  });
+
+  el("import-users-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.pendingUserBackup) return;
+    const replace = el("replace-users").checked;
+    if (replace && !window.confirm("Заменить весь список? Пользователи, отсутствующие в файле, потеряют доступ.")) return;
+    const submit = el("import-users-submit");
+    clearInlineError(el("import-users-error"));
+    setBusy(submit, true);
+    try {
+      const result = await apiRequest("/api/v1/users/import", {
+        method: "POST",
+        body: { mode: replace ? "replace" : "merge", backup: state.pendingUserBackup },
+      });
+      closeModal();
+      state.usersLoaded = false;
+      state.overviewLoaded = false;
+      state.connectionsLoaded = false;
+      state.journalLoaded = false;
+      showToast(`Импорт завершён: создано ${result.created || 0}, обновлено ${result.updated || 0}, удалено ${result.removed || 0}.`, "success");
+      if (result.warning === "session_termination_failed") {
+        showToast("Пользователи импортированы, но не все старые VPN-сессии удалось завершить.", "danger");
+      }
+      await loadUsers(true);
+    } catch (error) {
+      if (!handleUnauthorized(error)) showInlineError(el("import-users-error"), error.message || "Не удалось импортировать пользователей.");
+    } finally {
+      setBusy(submit, false);
     }
   });
 
@@ -989,11 +1194,14 @@
   });
 
   function showCredential(credential) {
-    if (!credential || typeof credential.username !== "string" || typeof credential.password !== "string") {
+    const connection = credential && credential.connection;
+    if (!credential || typeof credential.username !== "string" || typeof credential.password !== "string"
+      || !connection || typeof connection.text !== "string" || !connection.text.includes(credential.password)) {
       throw new ApiError("Сервер не вернул новые учётные данные.", 0, credential);
     }
     el("credential-username").textContent = credential.username;
     el("credential-password").value = credential.password;
+    el("credential-config").value = connection.text;
     openModal("credential-modal");
     if (credential.warning === "session_termination_failed") {
       showToast("Пароль изменён, но активные VPN-сессии завершить не удалось.", "danger");
@@ -1024,8 +1232,35 @@
   }
 
   el("copy-password-button").addEventListener("click", copyPassword);
+  el("copy-config-button").addEventListener("click", async () => {
+    const output = el("credential-config");
+    const configuration = output.value;
+    if (!configuration) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(configuration);
+      } else {
+        output.focus();
+        output.select();
+        if (!document.execCommand("copy")) throw new Error("copy command failed");
+      }
+      showToast("Конфигурация скопирована", "success");
+    } catch (_error) {
+      output.focus();
+      output.select();
+      showToast("Не удалось скопировать автоматически. Скопируйте выделенный текст вручную.", "danger");
+    }
+  });
+  el("download-config-button").addEventListener("click", () => {
+    const configuration = el("credential-config").value;
+    const username = el("credential-username").textContent;
+    if (!configuration || !/^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$/.test(username)) return;
+    downloadText(`ocserv-${username}.txt`, configuration, "text/plain;charset=utf-8");
+    showToast("Конфигурация скачана", "success");
+  });
   el("credential-close").addEventListener("click", () => {
     el("credential-password").value = "";
+    el("credential-config").value = "";
     el("credential-username").textContent = "—";
     closeModal(true);
     showToast("Учётные данные обновлены", "success");
