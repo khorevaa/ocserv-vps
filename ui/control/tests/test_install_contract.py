@@ -267,6 +267,16 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("print_ui_access_info_if_installed", installer)
         self.assertIn('rm -f "${OCSERV_UI_ACCESS_INFO_SCRIPT}"', installer)
 
+    def test_purge_uninstall_removes_root_only_credential_handoffs(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        uninstaller = (repository / "scripts" / "uninstall.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("[[ \"${PURGE_DATA}\" == 1 ]]", uninstaller)
+        self.assertIn("/root/ocserv-vps-ui-access", uninstaller)
+        self.assertIn("/root/ocserv-vps-initial-credentials", uninstaller)
+        self.assertIn("/root/ocserv-vps-user-*", uninstaller)
+
     def test_controller_tunnel_helpers_use_exact_installed_url(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         shell_helper = (repository / "helpers" / "ui-tunnel.sh").read_text(

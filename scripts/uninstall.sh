@@ -76,6 +76,10 @@ if [[ "${PURGE_DATA}" == 1 ]]; then
       "$(basename "${OCSERV_STACK_ROOT}")"
   fi
   rm -rf "${OCSERV_STACK_ROOT}" "${OCSERV_UI_WEB_RUN_DIR}" "${OCSERV_UI_ACTION_DIR}"
+  rm -f \
+    /root/ocserv-vps-ui-access \
+    /root/ocserv-vps-initial-credentials \
+    /root/ocserv-vps-user-*
   if ui_host_identity_is_exact; then
     userdel "${OCSERV_UI_HOST_USER}" >/dev/null 2>&1 || true
     groupdel "${OCSERV_UI_HOST_GROUP}" >/dev/null 2>&1 || true
