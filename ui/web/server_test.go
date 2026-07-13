@@ -100,6 +100,8 @@ func startFakeControl(t *testing.T, path string) {
 					result = map[string]any{"saved": true, "restarting": true, "bytes": len([]byte(content)), "sha256": hex.EncodeToString(digest[:])}
 				case "add_user":
 					result = map[string]any{"username": request["username"], "password": "Generated!Pass1", "connection": testConnectionProfile(request["username"], "Generated!Pass1")}
+				case "delete_user":
+					result = map[string]any{"username": request["username"], "deleted": true, "sessions_terminated": true}
 				case "rotate_password":
 					result = map[string]any{"username": request["username"], "password": "Generated!Pass2", "connection": testConnectionProfile(request["username"], "Generated!Pass2"), "sessions_terminated": request["terminate_sessions"]}
 				case "export_users":
@@ -124,6 +126,7 @@ func testConnectionProfile(username any, password string) map[string]any {
 	return map[string]any{
 		"server": server, "host": "vpn.test", "port": 443, "protocol": "anyconnect",
 		"username": name, "password": password,
+		"cli":  "openconnect --protocol=anyconnect --user=" + name + " " + server,
 		"text": "server=" + server + "\nprotocol=anyconnect\nusername=" + name + "\npassword=" + password + "\n",
 	}
 }
@@ -229,8 +232,16 @@ func TestSecretOnlyFlowAndEmbeddedUI(t *testing.T) {
 		t.Fatalf("csrf denial=%d", denied.Code)
 	}
 	created := perform(app, "POST", "/api/v1/users", `{"username":"alice"}`, cookies[0], csrf)
-	if created.Code != 201 || !strings.Contains(created.Body.String(), "Generated!Pass1") || !strings.Contains(created.Body.String(), `"protocol":"anyconnect"`) {
+	if created.Code != 201 || !strings.Contains(created.Body.String(), "Generated!Pass1") || !strings.Contains(created.Body.String(), `"protocol":"anyconnect"`) || !strings.Contains(created.Body.String(), `"cli":"openconnect`) {
 		t.Fatalf("create=%d %s", created.Code, created.Body.String())
+	}
+	deleteDenied := perform(app, "DELETE", "/api/v1/users/alice", "", cookies[0], "")
+	if deleteDenied.Code != http.StatusForbidden {
+		t.Fatalf("delete CSRF denial=%d", deleteDenied.Code)
+	}
+	deleted := perform(app, "DELETE", "/api/v1/users/alice", "", cookies[0], csrf)
+	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":true`) {
+		t.Fatalf("delete=%d %s", deleted.Code, deleted.Body.String())
 	}
 	stateData, err := os.ReadFile(app.store.path)
 	if err != nil {

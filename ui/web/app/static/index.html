@@ -584,6 +584,29 @@
       </form>
     </section>
 
+    <section id="delete-user-modal" class="modal is-hidden" role="dialog" aria-modal="true" aria-labelledby="delete-user-title">
+      <header class="modal-header">
+        <div>
+          <p class="eyebrow">VPN-доступ</p>
+          <h2 id="delete-user-title">Удалить пользователя?</h2>
+        </div>
+        <button class="icon-button modal-close" type="button" aria-label="Закрыть окно">
+          <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+        </button>
+      </header>
+      <form id="delete-user-form">
+        <div class="modal-body">
+          <div id="delete-user-error" class="alert alert--danger is-hidden" role="alert"></div>
+          <p>Пользователь <strong id="delete-username"></strong> потеряет доступ к VPN.</p>
+          <p class="modal-note modal-note--warning">Активные VPN-сессии будут завершены. Это действие нельзя отменить.</p>
+        </div>
+        <footer class="modal-actions">
+          <button class="button button--secondary modal-close" type="button">Отмена</button>
+          <button id="delete-user-submit" class="button button--danger" type="submit">Удалить пользователя</button>
+        </footer>
+      </form>
+    </section>
+
     <section id="import-users-modal" class="modal is-hidden" role="dialog" aria-modal="true" aria-labelledby="import-users-title">
       <header class="modal-header">
         <div>
@@ -640,20 +663,33 @@
             </dd>
           </div>
           <div>
-            <dt>Конфигурация подключения для телефона или роутера</dt>
+            <dt>Команда для OpenConnect CLI</dt>
+            <dd>
+              <div class="credential-cli-output">
+                <input id="credential-cli" type="text" readonly autocomplete="off" spellcheck="false" aria-label="Команда OpenConnect CLI">
+                <button id="copy-cli-button" class="button button--secondary" type="button">
+                  <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
+                  <span>Копировать команду</span>
+                </button>
+              </div>
+              <p class="credential-help">OpenConnect запросит пароль после запуска команды.</p>
+            </dd>
+          </div>
+          <div>
+            <dt>Текстовая конфигурация для телефона или роутера</dt>
             <dd>
               <textarea id="credential-config" class="config-output" readonly autocomplete="off" spellcheck="false" aria-label="Текстовая конфигурация VPN"></textarea>
               <div class="credential-config-actions">
                 <button id="copy-config-button" class="button button--secondary" type="button">
                   <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
-                  <span>Копировать конфигурацию</span>
+                  <span>Копировать текст</span>
                 </button>
                 <button id="download-config-button" class="button button--secondary" type="button">
                   <svg aria-hidden="true"><use href="#icon-download"></use></svg>
                   <span>Скачать .txt</span>
                 </button>
               </div>
-              <p class="field-help">Тип VPN: Cisco AnyConnect / OpenConnect. Пароль также находится в тексте и показывается только в этом окне.</p>
+              <p class="credential-help">Тип VPN: Cisco AnyConnect / OpenConnect. Текст содержит пароль и показывается только в этом окне.</p>
             </dd>
           </div>
         </dl>

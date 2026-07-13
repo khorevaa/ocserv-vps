@@ -1243,6 +1243,13 @@ tbody tr:hover {
   border-color: var(--red-soft);
 }
 
+.user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 .connections-table,
 .journal-table,
 .container-logs-table {
@@ -1556,12 +1563,15 @@ tbody tr:hover {
   font-weight: 620;
 }
 
-.password-output {
+.password-output,
+.credential-cli-output {
   display: flex;
   gap: 9px;
 }
 
-.password-output input {
+.password-output input,
+.credential-cli-output input {
+  min-width: 0;
   width: 100%;
   padding: 0 12px;
   font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
@@ -1591,6 +1601,14 @@ tbody tr:hover {
   flex-wrap: wrap;
   gap: 9px;
   margin-top: 10px;
+}
+
+.credential-help {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .configuration-note {
@@ -1967,11 +1985,13 @@ tbody tr:hover {
     padding-inline: 19px;
   }
 
-  .password-output {
+  .password-output,
+  .credential-cli-output {
     flex-direction: column;
   }
 
-  .password-output .button {
+  .password-output .button,
+  .credential-cli-output .button {
     width: 100%;
   }
 

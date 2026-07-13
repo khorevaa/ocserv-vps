@@ -150,6 +150,8 @@ func (a *application) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		a.addUser(writer, request, context)
 	case strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/password") && request.Method == http.MethodPut:
 		a.rotatePassword(writer, request, context)
+	case strings.HasPrefix(path, "/api/v1/users/") && request.Method == http.MethodDelete:
+		a.deleteUser(writer, request, context)
 	default:
 		notFound(writer)
 	}
@@ -550,6 +552,23 @@ func (a *application) addUser(writer http.ResponseWriter, request *http.Request,
 		return
 	}
 	writeJSON(writer, http.StatusCreated, value)
+}
+
+func (a *application) deleteUser(writer http.ResponseWriter, request *http.Request, context requestContext) {
+	noStore(writer.Header())
+	if !a.requireCSRF(writer, request, context) {
+		return
+	}
+	username := strings.TrimPrefix(request.URL.Path, "/api/v1/users/")
+	if !usernamePattern.MatchString(username) {
+		writeJSON(writer, 422, map[string]string{"detail": "invalid username"})
+		return
+	}
+	raw, err := a.control.request("delete_user", map[string]any{"username": username})
+	if err == nil {
+		a.recordAudit(auditRecord{Actor: "operator", Action: "delete_user", Target: username, Success: true, Remote: remoteIdentity(request)})
+	}
+	a.controlResponse(writer, raw, err, nil)
 }
 
 func (a *application) rotatePassword(writer http.ResponseWriter, request *http.Request, context requestContext) {

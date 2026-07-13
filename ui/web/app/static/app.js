@@ -26,6 +26,7 @@
     overviewLoaded: false,
     currentView: "overview",
     rotateUsername: "",
+    deleteUsername: "",
     disconnectID: 0,
     pendingUserBackup: null,
     activeModal: null,
@@ -826,6 +827,8 @@
 
       const actionsCell = document.createElement("td");
       actionsCell.className = "table-action-cell";
+      const actions = document.createElement("div");
+      actions.className = "user-actions";
       const rotateButton = document.createElement("button");
       rotateButton.type = "button";
       rotateButton.className = "button row-action";
@@ -833,7 +836,15 @@
       rotateButton.dataset.username = user.username;
       rotateButton.setAttribute("aria-label", `Изменить пароль пользователя ${user.username}`);
       rotateButton.textContent = "Изменить пароль";
-      actionsCell.appendChild(rotateButton);
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "button row-action row-action--danger";
+      deleteButton.dataset.action = "delete-user";
+      deleteButton.dataset.username = user.username;
+      deleteButton.setAttribute("aria-label", `Удалить пользователя ${user.username}`);
+      deleteButton.textContent = "Удалить";
+      actions.append(rotateButton, deleteButton);
+      actionsCell.appendChild(actions);
 
       row.append(usernameCell, statusCell, sessionsCell, actionsCell);
       fragment.appendChild(row);
@@ -881,9 +892,13 @@
   el("users-next").addEventListener("click", () => { state.usersPage += 1; renderUsers(); });
   el("users-refresh").addEventListener("click", () => loadUsers(true));
   usersTableBody.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-action='rotate-password']");
+    const button = event.target.closest("[data-action]");
     if (!button) return;
-    openRotatePassword(button.dataset.username || "");
+    if (button.dataset.action === "rotate-password") {
+      openRotatePassword(button.dataset.username || "");
+    } else if (button.dataset.action === "delete-user") {
+      openDeleteUser(button.dataset.username || "");
+    }
   });
 
   function normalizeConnections(payload) {
@@ -1202,6 +1217,7 @@
     if (state.activeModal.id === "credential-modal" && !force) return;
     if (state.activeModal.id === "credential-modal") {
       el("credential-password").value = "";
+      el("credential-cli").value = "";
       el("credential-config").value = "";
       el("credential-username").textContent = "—";
     }
@@ -1210,6 +1226,10 @@
       el("import-users-form").reset();
       el("import-users-file-name").textContent = "—";
       el("import-users-count").textContent = "0";
+    }
+    if (state.activeModal.id === "delete-user-modal") {
+      state.deleteUsername = "";
+      el("delete-username").textContent = "";
     }
     document.querySelectorAll(".modal").forEach((modal) => setHidden(modal, true));
     setHidden(modalBackdrop, true);
@@ -1469,14 +1489,54 @@
     }
   });
 
+  function openDeleteUser(username) {
+    if (!username) return;
+    state.deleteUsername = username;
+    el("delete-username").textContent = username;
+    clearInlineError(el("delete-user-error"));
+    openModal("delete-user-modal");
+  }
+
+  el("delete-user-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = state.deleteUsername;
+    if (!username) return;
+    clearInlineError(el("delete-user-error"));
+    const submit = el("delete-user-submit");
+    setBusy(submit, true);
+    try {
+      const result = await apiRequest(`/api/v1/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+      if (!result || result.deleted !== true) throw new Error("Сервер не подтвердил удаление пользователя.");
+      closeModal();
+      state.deleteUsername = "";
+      state.usersLoaded = false;
+      state.overviewLoaded = false;
+      state.connectionsLoaded = false;
+      state.journalLoaded = false;
+      showToast(`Пользователь ${username} удалён`, "success");
+      if (result.warning === "session_termination_failed") {
+        showToast("Пользователь удалён, но активные VPN-сессии завершить не удалось.", "danger");
+      }
+      await loadUsers(true);
+    } catch (error) {
+      if (!handleUnauthorized(error)) {
+        showInlineError(el("delete-user-error"), error.message || "Не удалось удалить пользователя.");
+      }
+    } finally {
+      setBusy(submit, false);
+    }
+  });
+
   function showCredential(credential) {
     const connection = credential && credential.connection;
     if (!credential || typeof credential.username !== "string" || typeof credential.password !== "string"
-      || !connection || typeof connection.text !== "string" || !connection.text.includes(credential.password)) {
+      || !connection || typeof connection.cli !== "string" || !connection.cli.startsWith("openconnect ")
+      || typeof connection.text !== "string" || !connection.text.includes(credential.password)) {
       throw new ApiError("Сервер не вернул новые учётные данные.", 0, credential);
     }
     el("credential-username").textContent = credential.username;
     el("credential-password").value = credential.password;
+    el("credential-cli").value = connection.cli;
     el("credential-config").value = connection.text;
     openModal("credential-modal");
     if (credential.warning === "session_termination_failed") {
@@ -1508,6 +1568,19 @@
   }
 
   el("copy-password-button").addEventListener("click", copyPassword);
+  el("copy-cli-button").addEventListener("click", async () => {
+    const output = el("credential-cli");
+    const command = output.value;
+    if (!command) return;
+    try {
+      await copyText(command);
+      showToast("Команда OpenConnect CLI скопирована", "success");
+    } catch (_error) {
+      output.focus();
+      output.select();
+      showToast("Не удалось скопировать автоматически. Скопируйте выделенную команду вручную.", "danger");
+    }
+  });
   el("copy-config-button").addEventListener("click", async () => {
     const output = el("credential-config");
     const configuration = output.value;
@@ -1520,7 +1593,7 @@
         output.select();
         if (!document.execCommand("copy")) throw new Error("copy command failed");
       }
-      showToast("Конфигурация скопирована", "success");
+      showToast("Текстовая конфигурация скопирована", "success");
     } catch (_error) {
       output.focus();
       output.select();
@@ -1536,6 +1609,7 @@
   });
   el("credential-close").addEventListener("click", () => {
     el("credential-password").value = "";
+    el("credential-cli").value = "";
     el("credential-config").value = "";
     el("credential-username").textContent = "—";
     closeModal(true);

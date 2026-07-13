@@ -282,6 +282,10 @@ class InstallComposeContractTests(unittest.TestCase):
         for element_id in (
             'id="export-users-button"',
             'id="import-users-button"',
+            'id="delete-user-modal"',
+            'id="delete-user-submit"',
+            'id="credential-cli"',
+            'id="copy-cli-button"',
             'id="credential-config"',
             'id="copy-config-button"',
             'id="download-config-button"',
@@ -297,14 +301,18 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn('apiRequest("/api/v1/users/export"', app)
         self.assertIn('apiRequest("/api/v1/users/import"', app)
         self.assertIn("credential.connection", app)
+        self.assertIn("connection.cli", app)
         self.assertIn("connection.text", app)
+        self.assertIn('method: "DELETE"', app)
         self.assertEqual(app.count("localStorage.setItem"), 1)
         self.assertIn('localStorage.setItem("ocserv-ui-theme"', app)
         self.assertIn('path == "/api/v1/users/export"', web)
         self.assertIn('path == "/api/v1/users/import"', web)
+        self.assertIn('a.control.request("delete_user"', web)
         self.assertIn('path == "/api/v1/ui/access-secret"', web)
         self.assertIn('"password_hash"', control)
         self.assertIn('"connection": connection', control)
+        self.assertIn('"delete_user"', control)
 
     def test_installer_reserves_and_validates_host_identity_transactionally(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
