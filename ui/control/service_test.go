@@ -31,16 +31,16 @@ type fakeRunner struct {
 	inputs        []string
 }
 
-func (f *fakeRunner) Run(argv []string, stdin string) (string, error) {
+func (f *fakeRunner) Run(argv []string, stdin string) (commandOutput, error) {
 	f.calls = append(f.calls, append([]string(nil), argv...))
 	f.inputs = append(f.inputs, stdin)
 	if strings.Contains(filepath.Base(argv[0]), "ocpasswd") {
 		if f.failPassword {
-			return "", controlFailure(503, "backend_error", "rejected")
+			return commandOutput{}, controlFailure(503, "backend_error", "rejected")
 		}
 		lines := strings.Split(strings.TrimSpace(stdin), "\n")
 		if len(lines) != 2 || lines[0] == "" || lines[0] != lines[1] {
-			return "", errors.New("bad password input")
+			return commandOutput{}, errors.New("bad password input")
 		}
 		username := argv[len(argv)-1]
 		content, _ := os.ReadFile(f.passwordPath)
@@ -52,47 +52,47 @@ func (f *fakeRunner) Run(argv []string, stdin string) (string, error) {
 		}
 		output = append(output, username+":*:newhash")
 		if err := os.WriteFile(f.passwordPath, []byte(strings.Join(output, "\n")+"\n"), 0o600); err != nil {
-			return "", err
+			return commandOutput{}, err
 		}
-		return "", nil
+		return commandOutput{}, nil
 	}
 	if filepath.Base(argv[0]) == "ocserv" {
 		if reflect.DeepEqual(argv[1:], []string{"--version"}) {
-			return "OpenConnect VPN Server 1.5.0\nCompiled with: seccomp\n", nil
+			return commandOutput{stderr: "ocserv 1.5.0\n\nCompiled with: seccomp\n"}, nil
 		}
 		if f.failConfig {
-			return "", controlFailure(503, "backend_error", "rejected")
+			return commandOutput{}, controlFailure(503, "backend_error", "rejected")
 		}
 		if len(argv) != 3 || argv[1] != "--test-config" || !strings.HasPrefix(argv[2], "--config=") {
-			return "", errors.New("unsafe ocserv validation command")
+			return commandOutput{}, errors.New("unsafe ocserv validation command")
 		}
 		candidate := strings.TrimPrefix(argv[2], "--config=")
 		content, err := os.ReadFile(candidate)
 		if err != nil || len(content) == 0 || strings.Contains(string(content), "reject-this-directive") {
-			return "", controlFailure(503, "backend_error", "rejected")
+			return commandOutput{}, controlFailure(503, "backend_error", "rejected")
 		}
-		return "", nil
+		return commandOutput{}, nil
 	}
 	command := argv[4:]
 	switch {
 	case reflect.DeepEqual(command, []string{"show", "status"}):
-		return `{"Status":"online","uptime":1234,"Active sessions":2,"Private backend detail":"must-not-leak"}`, nil
+		return commandOutput{stdout: `{"Status":"online","uptime":1234,"Active sessions":2,"Private backend detail":"must-not-leak"}`}, nil
 	case reflect.DeepEqual(command, []string{"show", "users"}):
-		return `[{"ID":41,"Username":"alice","Remote IP":"192.0.2.1","IPv4":"10.66.0.8","raw_connected_at":1783850400},{"ID":42,"Username":"alice","Remote IP":"192.0.2.2","IPv4":"10.66.0.9","raw_connected_at":1783850460}]`, nil
+		return commandOutput{stdout: `[{"ID":41,"Username":"alice","Remote IP":"192.0.2.1","IPv4":"10.66.0.8","raw_connected_at":1783850400},{"ID":42,"Username":"alice","Remote IP":"192.0.2.2","IPv4":"10.66.0.9","raw_connected_at":1783850460}]`}, nil
 	case reflect.DeepEqual(command, []string{"reload"}):
 		if f.failReload {
-			return "", controlFailure(503, "backend_error", "rejected")
+			return commandOutput{}, controlFailure(503, "backend_error", "rejected")
 		}
-		return `{}`, nil
+		return commandOutput{stdout: `{}`}, nil
 	case len(command) == 3 && command[0] == "terminate" && command[1] == "user":
 		if f.failTerminate {
-			return "", controlFailure(503, "backend_error", "rejected")
+			return commandOutput{}, controlFailure(503, "backend_error", "rejected")
 		}
-		return `{}`, nil
+		return commandOutput{stdout: `{}`}, nil
 	case reflect.DeepEqual(command, []string{"disconnect", "id", "41"}):
-		return `{}`, nil
+		return commandOutput{stdout: `{}`}, nil
 	default:
-		return "", errors.New("unexpected command: " + strings.Join(command, " "))
+		return commandOutput{}, errors.New("unexpected command: " + strings.Join(command, " "))
 	}
 }
 
@@ -513,8 +513,8 @@ func TestBackendFailuresAreNotRenderedAsZero(t *testing.T) {
 
 type errorRunner struct{}
 
-func (errorRunner) Run([]string, string) (string, error) {
-	return "", controlFailure(503, "backend_unavailable", "unavailable")
+func (errorRunner) Run([]string, string) (commandOutput, error) {
+	return commandOutput{}, controlFailure(503, "backend_unavailable", "unavailable")
 }
 
 func TestCertificateValidation(t *testing.T) {

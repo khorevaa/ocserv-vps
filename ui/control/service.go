@@ -339,20 +339,22 @@ func (s *controlService) overview() (map[string]any, error) {
 }
 
 func (s *controlService) ocservVersion() (string, error) {
-	raw, err := s.runner.Run([]string{s.config.OCServBin, "--version"}, "")
+	output, err := s.runner.Run([]string{s.config.OCServBin, "--version"}, "")
 	if err != nil {
 		return "", err
 	}
-	const prefix = "OpenConnect VPN Server "
+	raw := output.stdout + "\n" + output.stderr
 	for _, line := range strings.Split(raw, "\n") {
-		if !strings.HasPrefix(line, prefix) {
-			continue
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{"ocserv ", "OpenConnect VPN Server "} {
+			if !strings.HasPrefix(line, prefix) {
+				continue
+			}
+			version := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			if versionPattern.MatchString(version) {
+				return version, nil
+			}
 		}
-		version := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		if versionPattern.MatchString(version) {
-			return version, nil
-		}
-		break
 	}
 	return "", controlFailure(503, "backend_error", "The ocserv backend returned an invalid version.")
 }
@@ -610,7 +612,8 @@ func (s *controlService) connectionProfile(username, password string) (map[strin
 func (s *controlService) runOCCTL(arguments ...string) (string, error) {
 	argv := []string{s.config.OCCTLBin, "-j", "-s", s.config.OCCTLSocket}
 	argv = append(argv, arguments...)
-	return s.runner.Run(argv, "")
+	output, err := s.runner.Run(argv, "")
+	return output.stdout, err
 }
 
 func (s *controlService) occtlJSON(arguments ...string) (any, error) {
