@@ -126,6 +126,12 @@ func (a *application) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		a.restartService(writer, request, context)
 	case path == "/api/v1/certificate/renew" && request.Method == http.MethodPost:
 		a.renewCertificate(writer, request, context)
+	case path == "/api/v1/configuration" && request.Method == http.MethodGet:
+		a.readConfiguration(writer)
+	case path == "/api/v1/configuration/download" && request.Method == http.MethodGet:
+		a.downloadConfiguration(writer, request)
+	case path == "/api/v1/configuration" && request.Method == http.MethodPut:
+		a.writeConfiguration(writer, request, context)
 	case path == "/api/v1/users" && request.Method == http.MethodGet:
 		a.listUsers(writer)
 	case path == "/api/v1/users/export" && request.Method == http.MethodPost:

@@ -100,6 +100,8 @@ services:
       OCSERV_UI_JOURNAL_FILE: /opt/ocserv-vps/logs/vpn-events.jsonl
     volumes:
       - ./config:/opt/ocserv-vps/config:rw
+      - ./config:/etc/ocserv:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./locks:/opt/ocserv-vps/locks:rw
       - ./ui-public:/opt/ocserv-vps/ui-public:ro
       - ./logs:/opt/ocserv-vps/logs:ro

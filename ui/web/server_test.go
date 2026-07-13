@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net"
@@ -29,6 +31,9 @@ func startFakeControl(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
+	configuration := "auth = \"plain[passwd=/etc/ocserv/ocpasswd]\"\ntcp-port = 443\n"
+	configurationDigest := sha256.Sum256([]byte(configuration))
+	configurationSHA256 := hex.EncodeToString(configurationDigest[:])
 	go func() {
 		for {
 			connection, err := listener.Accept()
@@ -62,6 +67,12 @@ func startFakeControl(t *testing.T, path string) {
 					result = map[string]any{"restarting": true}
 				case "renew_certificate":
 					result = map[string]any{"renewal_requested": true}
+				case "read_configuration":
+					result = map[string]any{"content": configuration, "filename": "ocserv.conf", "bytes": len([]byte(configuration)), "sha256": configurationSHA256}
+				case "write_configuration":
+					content, _ := request["content"].(string)
+					digest := sha256.Sum256([]byte(content))
+					result = map[string]any{"saved": true, "restarting": true, "bytes": len([]byte(content)), "sha256": hex.EncodeToString(digest[:])}
 				case "add_user":
 					result = map[string]any{"username": request["username"], "password": "Generated!Pass1", "connection": testConnectionProfile(request["username"], "Generated!Pass1")}
 				case "rotate_password":
@@ -169,12 +180,12 @@ func TestSecretOnlyFlowAndEmbeddedUI(t *testing.T) {
 	}
 	index := perform(app, "GET", "/", "", cookies[0], "")
 	html := index.Body.String()
-	for _, forbidden := range []string{"login-form", "operator-name", "Управление доступом", ">Обзор<"} {
+	for _, forbidden := range []string{"login-form", "operator-name", "Управление доступом", ">Обзор<", `aria-haspopup="menu"`, `role="menuitemradio"`} {
 		if strings.Contains(html, forbidden) {
 			t.Fatalf("legacy UI artifact remains: %s", forbidden)
 		}
 	}
-	for _, required := range []string{"Состояние системы", "Подключения", "Журнал событий", "Пользователи", "Как в системе", "Тёмная", "Секрет доступа", "Последняя проверка", `aria-haspopup="menu"`, `role="menuitemradio"`} {
+	for _, required := range []string{"Состояние системы", "Подключения", "Журнал событий", "Пользователи", "Тема оформления: как в системе, светлая", "Секрет доступа", "Последняя проверка", `role="switch"`, `aria-checked="false"`, `id="icon-sun"`, `id="icon-moon"`} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("missing UI label %s", required)
 		}
@@ -236,6 +247,50 @@ func TestUserBackupExportAndImportRequireCSRFWithoutPersistingHashes(t *testing.
 	}
 	if strings.Contains(string(stateData), "private-hash") {
 		t.Fatal("password hash leaked to persistent web state")
+	}
+}
+
+func TestConfigurationViewDownloadAndValidatedSaveRequireCSRF(t *testing.T) {
+	app, _ := testApplication(t, strings.Repeat("A", 64))
+	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+strings.Repeat("A", 64)+`"}`, nil, "")
+	cookie := access.Result().Cookies()[0]
+	csrf, _ := decodeBody(t, access)["csrf_token"].(string)
+
+	loaded := perform(app, "GET", "/api/v1/configuration", "", cookie, "")
+	if loaded.Code != http.StatusOK {
+		t.Fatalf("configuration=%d %s", loaded.Code, loaded.Body.String())
+	}
+	payload := decodeBody(t, loaded)
+	content, _ := payload["content"].(string)
+	revision, _ := payload["sha256"].(string)
+	if payload["filename"] != "ocserv.conf" || !strings.Contains(content, "tcp-port = 443") || !configurationSHA256Pattern.MatchString(revision) {
+		t.Fatalf("invalid configuration payload: %#v", payload)
+	}
+
+	downloaded := perform(app, "GET", "/api/v1/configuration/download", "", cookie, "")
+	if downloaded.Code != http.StatusOK || downloaded.Header().Get("Content-Type") != "text/plain; charset=utf-8" || !strings.Contains(downloaded.Header().Get("Content-Disposition"), "ocserv.conf") || downloaded.Body.String() != content {
+		t.Fatalf("download=%d %s", downloaded.Code, downloaded.Body.String())
+	}
+
+	request, _ := json.Marshal(map[string]any{"content": content + "max-clients = 96\n", "previous_sha256": revision, "restart": true})
+	if response := perform(app, "PUT", "/api/v1/configuration", string(request), cookie, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("configuration save without CSRF=%d", response.Code)
+	}
+	saved := perform(app, "PUT", "/api/v1/configuration", string(request), cookie, csrf)
+	if saved.Code != http.StatusOK || !strings.Contains(saved.Body.String(), `"saved":true`) || !strings.Contains(saved.Body.String(), `"restarting":true`) {
+		t.Fatalf("configuration save=%d %s", saved.Code, saved.Body.String())
+	}
+	stateData, err := os.ReadFile(app.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stateData), "max-clients = 96") {
+		t.Fatal("configuration content leaked to persistent web state")
+	}
+
+	index := perform(app, "GET", "/", "", cookie, "")
+	if !strings.Contains(index.Body.String(), `data-view="configuration"`) || !strings.Contains(index.Body.String(), `id="configuration-editor"`) || strings.Contains(index.Body.String(), `id="logout-button"`) {
+		t.Fatalf("configuration navigation or logout removal is incorrect")
 	}
 }
 

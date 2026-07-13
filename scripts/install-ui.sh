@@ -454,6 +454,10 @@ services:
       # A directory mount is required for same-filesystem atomic snapshots of
       # ocpasswd; UI data and UI secrets remain outside this mount.
       - ./config:/opt/ocserv-vps/config:rw
+      # The validator sees the same paths as the ocserv container. Certificate
+      # material stays read-only and the control container has no network.
+      - ./config:/etc/ocserv:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./locks:/opt/ocserv-vps/locks:rw
       - ./ui-public:/opt/ocserv-vps/ui-public:ro
       - ./logs:/opt/ocserv-vps/logs:ro

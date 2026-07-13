@@ -4,7 +4,7 @@
 
 Готовый VPN-сервер на базе [ocserv](https://www.infradead.org/ocserv/) для собственного VPS: установка одной командой, управление пользователями и закрытая веб-панель.
 
-![Панель управления ocserv-vps](docs/images/ui-overview.png)
+![Состояние системы в панели ocserv-vps](docs/images/ui-overview.png)
 
 ## Возможности
 
@@ -57,7 +57,7 @@ sudo ocserv-vps install
 Конкретную версию менеджера можно указать аргументом:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.4
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.6
 ```
 
 ## Управление
@@ -89,6 +89,18 @@ bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/in
 ### Защищённый вход
 
 ![Вход в панель через секрет доступа](docs/images/ui-access.png)
+
+### Состояние системы
+
+![Состояние VPN-сервера, сертификата и панели управления](docs/images/ui-overview.png)
+
+### Активные подключения
+
+![Активные подключения к VPN](docs/images/ui-connections.png)
+
+### Журнал событий
+
+![Журнал подключений и отключений VPN](docs/images/ui-journal.png)
 
 ### Управление пользователями
 
