@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "synology",
+  "name": "Synology DSM",
+  "document": "index.html",
+  "entry_paths": ["/", "/webman/", "/webman/index.cgi"],
+  "requests_on_open": [
+    {
+      "method": "GET",
+      "target": "/webman/resources/css/desktop.css?v=7.2",
+      "response": {"status": 204, "content_type": "text/css; charset=utf-8", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/webman/resources/js/login.js?v=7.2",
+      "response": {"status": 204, "content_type": "text/javascript; charset=utf-8", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/webman/resources/images/favicon.svg",
+      "response": {"status": 204, "content_type": "image/svg+xml", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=SYNO.API.Auth%2CSYNO.Core.System",
+      "response": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"success\":true,\"data\":{\"SYNO.API.Auth\":{\"maxVersion\":7,\"minVersion\":1,\"path\":\"entry.cgi\"},\"SYNO.Core.System\":{\"maxVersion\":3,\"minVersion\":1,\"path\":\"entry.cgi\"}}}"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/webapi/entry.cgi?api=SYNO.Core.System&version=1&method=info",
+      "response": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"success\":true,\"data\":{\"hostname\":\"DiskStation\",\"model\":\"DS923+\",\"version\":\"7.2.2\"}}"
+      }
+    }
+  ],
+  "form_request": {
+    "method": "POST",
+    "target": "/webapi/entry.cgi",
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "fixed_body": "api=SYNO.API.Auth&version=7&method=login&account=&passwd=&session=FileStation&format=sid",
+    "response": {
+      "status": 503,
+      "content_type": "application/json; charset=utf-8",
+      "body": "{\"success\":false,\"error\":{\"code\":105}}"
+    }
+  }
+}
