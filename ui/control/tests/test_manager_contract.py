@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import io
 import os
 import pathlib
 import shutil
 import subprocess
+import sys
+import tarfile
 import tempfile
 import unittest
+import zipfile
 
 BASH = shutil.which("bash")
 if BASH is None:
@@ -39,6 +43,7 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn('tar -tvzf "${archive}" > "${archive_listing}"', self.installer)
         self.assertNotIn('tar -tvzf "${archive}" |', self.installer)
         self.assertIn('command_path="${OCSERV_VPS_COMMAND_PATH:-/usr/local/bin/ocserv-vps}"', self.installer)
+        self.assertIn('cp -a "${source_root}/assets" "${new_root}/assets"', self.installer)
         self.assertIn('"${command_path}" install', self.installer)
         self.assertIn('OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" "${tag}"', self.manager)
         self.assertNotIn('${version:+"${version}"}', self.manager)
@@ -67,11 +72,30 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn("OCSERV_CAMOUFLAGE", self.manager)
         self.assertIn("OCSERV_CAMOUFLAGE_SECRET", self.manager)
         self.assertIn("OCSERV_CAMOUFLAGE_REALM", self.manager)
+        self.assertIn("OCSERV_ADVANCED_CAMOUFLAGE", self.manager)
+        self.assertIn("OCSERV_CAMOUFLAGE_SITE_TEMPLATE", self.manager)
+        self.assertIn("OCSERV_CAMOUFLAGE_SITE_URL", self.manager)
+        self.assertIn(
+            "OCSERV_ADVANCED_CAMOUFLAGE=1 requires OCSERV_CAMOUFLAGE=1",
+            self.manager,
+        )
+        self.assertIn(
+            "OCSERV_CAMOUFLAGE_SITE_URL requires OCSERV_ADVANCED_CAMOUFLAGE=1",
+            self.manager,
+        )
+        self.assertIn(
+            "OCSERV_CAMOUFLAGE_SITE_TEMPLATE requires OCSERV_ADVANCED_CAMOUFLAGE=1",
+            self.manager,
+        )
+        self.assertIn("prompt_camouflage_site_template", self.manager)
+        self.assertIn("--camouflage-site-template", self.manager)
         self.assertIn('args+=(--camouflage)', self.manager)
         self.assertIn('OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET="${camouflage_secret}"', self.manager)
         self.assertIn('OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM="${camouflage_realm}"', self.manager)
+        self.assertIn('OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL="${camouflage_site_url}"', self.manager)
         self.assertIn("unset OCSERV_CAMOUFLAGE_SECRET OCSERV_CAMOUFLAGE_REALM", self.manager)
         self.assertNotIn('args+=(--camouflage-secret', self.manager)
+        self.assertNotIn('args+=(--camouflage-site-url', self.manager)
         self.assertIn("runtime_task bootstrap-vps.sh", self.manager)
         self.assertIn("runtime_task install-ui.sh", self.manager)
         self.assertIn("show_initial_vpn_credentials", self.manager)
@@ -200,6 +224,71 @@ printf 'hidden=%s\n' "$(ocserv_connection_url vpn.example.com 443)"
 validate_camouflage_realm 'Test Environment'
 printf '%s\n' 'realm=Test Environment'
 
+validate_camouflage_site_template company
+validate_camouflage_download_url 'https://downloads.example:8443/site.zip?token=test'
+printf 'download=%s host=%s port=%s\n' \
+  "${CAMOUFLAGE_DOWNLOAD_URL}" "${CAMOUFLAGE_DOWNLOAD_HOST}" "${CAMOUFLAGE_DOWNLOAD_PORT}"
+if (validate_camouflage_download_url 'http://downloads.example/site.zip' >/dev/null 2>&1); then
+  printf '%s\n' 'non-HTTPS download URL was accepted' >&2
+  exit 1
+fi
+if (validate_camouflage_download_url 'https://downloads.example:443:8443/site.zip' >/dev/null 2>&1); then
+  printf '%s\n' 'ambiguous site authority was accepted' >&2
+  exit 1
+fi
+
+# Avoid relying on POSIX permission and symlink emulation when this contract
+# runs under Git Bash on Windows; production still calls the real utilities.
+install() {
+  [[ "${1:-}" == -d ]] || { command install "$@"; return; }
+  shift
+  while [[ $# -gt 0 && "${1}" == -* ]]; do
+    case "${1}" in -m | -o | -g) shift 2 ;; *) shift ;; esac
+  done
+  mkdir -p "$@"
+}
+chmod() { :; }
+chown() { :; }
+ln() { :; }
+
+render_vpn_journal_assets() { :; }
+render_ocserv_config vpn.example.com 10.66.0.0/24 443 1.1.1.1 1.0.0.1 \
+  1 camouflage-secret-2026 'Test Environment' 1
+grep -q '^tcp-port = 8443$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
+grep -q '^listen-host = 127.0.0.1$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
+grep -q '^no-udp = true$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
+grep -q '^listen-proxy-proto = true$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
+printf '%s\n' 'advanced-ocserv=tcp-only-proxy-protocol'
+
+nginx_root="${config_root}/nginx"
+OCSERV_CAMOUFLAGE_TEMPLATE_ROOT="${TEST_CAMOUFLAGE_TEMPLATE_ROOT}"
+OCSERV_CAMOUFLAGE_SITE_ROOT="${config_root}/site"
+install_camouflage_site company '' vpn.example.com
+grep -q 'Northstar Systems' "${OCSERV_CAMOUFLAGE_SITE_ROOT}/index.html"
+grep -q '^template:company$' "${OCSERV_CAMOUFLAGE_SITE_ROOT}/.ocserv-vps-source"
+printf '%s\n' 'advanced-site=template:company'
+
+OCSERV_CAMOUFLAGE_NGINX_SITE="${nginx_root}/sites-available/site.conf"
+OCSERV_CAMOUFLAGE_NGINX_LINK="${nginx_root}/sites-enabled/site.conf"
+OCSERV_CAMOUFLAGE_NGINX_STREAM="${nginx_root}/modules-enabled/90-stream.conf"
+OCSERV_NGINX_STREAM_MODULE_CONFIG="${nginx_root}/modules-enabled/50-stream.conf"
+OCSERV_LETSENCRYPT_LIVE_ROOT="${config_root}/letsencrypt/live"
+mkdir -p "$(dirname "${OCSERV_NGINX_STREAM_MODULE_CONFIG}")" \
+  "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com"
+touch "${OCSERV_NGINX_STREAM_MODULE_CONFIG}" \
+  "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com/fullchain.pem" \
+  "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com/privkey.pem"
+render_advanced_camouflage_nginx vpn.example.com 443
+grep -q 'ssl_preread on;' "${OCSERV_CAMOUFLAGE_NGINX_STREAM}"
+grep -q 'proxy_protocol on;' "${OCSERV_CAMOUFLAGE_NGINX_STREAM}"
+grep -q 'ssl http2 proxy_protocol;' "${OCSERV_CAMOUFLAGE_NGINX_SITE}"
+grep -q "root ${OCSERV_CAMOUFLAGE_SITE_ROOT};" "${OCSERV_CAMOUFLAGE_NGINX_SITE}"
+if grep -q 'proxy_pass https://' "${OCSERV_CAMOUFLAGE_NGINX_SITE}"; then
+  printf '%s\n' 'static Camouflage site was configured as a reverse proxy' >&2
+  exit 1
+fi
+printf '%s\n' 'advanced-nginx=alpn-site-or-tls-passthrough'
+
 printf '%s\n' 'camouflage = true' 'camouflage_secret = short' > "${OCSERV_CONFIG_DIR}/ocserv.conf"
 if (ocserv_connection_url vpn.example.com 443 >/dev/null 2>&1); then
   printf '%s\n' 'unsafe secret was accepted' >&2
@@ -210,6 +299,9 @@ fi
             script = pathlib.Path(directory) / "camouflage-url-test.sh"
             script.write_text(common + scenario, encoding="utf-8")
             environment = os.environ.copy()
+            environment["TEST_CAMOUFLAGE_TEMPLATE_ROOT"] = (
+                self.repository / "assets" / "camouflage-sites"
+            ).as_posix()
             if os.name == "nt":
                 environment["PATH"] = ";".join(
                     (
@@ -236,6 +328,104 @@ fi
             result.stdout,
         )
         self.assertIn("realm=Test Environment", result.stdout)
+        self.assertIn(
+            "download=https://downloads.example:8443/site.zip?token=test "
+            "host=downloads.example port=8443",
+            result.stdout,
+        )
+        self.assertIn("advanced-ocserv=tcp-only-proxy-protocol", result.stdout)
+        self.assertIn("advanced-site=template:company", result.stdout)
+        self.assertIn("advanced-nginx=alpn-site-or-tls-passthrough", result.stdout)
+
+    def test_camouflage_site_assets_and_safe_extractor(self) -> None:
+        template_root = self.repository / "assets" / "camouflage-sites"
+        self.assertEqual(
+            {path.name for path in template_root.iterdir() if path.is_dir()},
+            {"construction", "company", "blog", "status"},
+        )
+        for template in ("construction", "company", "blog", "status"):
+            html = (template_root / template / "index.html").read_text(encoding="utf-8")
+            self.assertIn("<!doctype html>", html.lower())
+            self.assertIn("<title>", html.lower())
+
+        extractor = self.repository / "scripts" / "extract-camouflage-site.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            archive = root / "site.zip"
+            destination = root / "site"
+            with zipfile.ZipFile(archive, "w") as package:
+                package.writestr("wrapper/index.html", "<!doctype html><title>Safe</title>")
+                package.writestr("wrapper/assets/site.css", "body{color:#123}")
+            safe = subprocess.run(
+                [sys.executable, str(extractor), str(archive), str(destination)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(safe.returncode, 0, safe.stderr)
+            self.assertTrue((destination / "index.html").is_file())
+            self.assertTrue((destination / "assets" / "site.css").is_file())
+
+            tar_archive = root / "site.tar.gz"
+            tar_destination = root / "tar-site"
+            tar_html = b"<!doctype html><title>Tar site</title>"
+            with tarfile.open(tar_archive, "w:gz") as package:
+                entry = tarfile.TarInfo("site/index.html")
+                entry.size = len(tar_html)
+                package.addfile(entry, io.BytesIO(tar_html))
+            safe_tar = subprocess.run(
+                [sys.executable, str(extractor), str(tar_archive), str(tar_destination)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(safe_tar.returncode, 0, safe_tar.stderr)
+            self.assertTrue((tar_destination / "index.html").is_file())
+
+            html_download = root / "site.html"
+            html_destination = root / "html-site"
+            html_download.write_text("<!doctype html><title>HTML site</title>", encoding="utf-8")
+            safe_html = subprocess.run(
+                [sys.executable, str(extractor), str(html_download), str(html_destination)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(safe_html.returncode, 0, safe_html.stderr)
+            self.assertTrue((html_destination / "index.html").is_file())
+
+            unsafe_archive = root / "unsafe.zip"
+            unsafe_destination = root / "unsafe-site"
+            with zipfile.ZipFile(unsafe_archive, "w") as package:
+                package.writestr("../escaped.html", "unsafe")
+                package.writestr("index.html", "<!doctype html><title>Unsafe</title>")
+            unsafe = subprocess.run(
+                [sys.executable, str(extractor), str(unsafe_archive), str(unsafe_destination)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(unsafe.returncode, 0)
+            self.assertFalse((root / "escaped.html").exists())
+
+            linked_archive = root / "linked.tar.gz"
+            linked_destination = root / "linked-site"
+            with tarfile.open(linked_archive, "w:gz") as package:
+                index = tarfile.TarInfo("site/index.html")
+                index.size = len(tar_html)
+                package.addfile(index, io.BytesIO(tar_html))
+                link = tarfile.TarInfo("site/latest.html")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "index.html"
+                package.addfile(link)
+            linked = subprocess.run(
+                [sys.executable, str(extractor), str(linked_archive), str(linked_destination)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(linked.returncode, 0)
+            self.assertFalse((linked_destination / "latest.html").exists())
 
 
 if __name__ == "__main__":

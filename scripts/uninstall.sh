@@ -26,6 +26,12 @@ require_root
 [[ "${APPROVE_UNINSTALL}" == 1 ]] || die '--approve-uninstall is required.'
 acquire_stack_locks
 
+NGINX_CAMOUFLAGE_WAS_MANAGED=0
+if [[ -e "${OCSERV_CAMOUFLAGE_NGINX_SITE}" || -L "${OCSERV_CAMOUFLAGE_NGINX_SITE}" || \
+      -e "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" || -L "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" ]]; then
+  NGINX_CAMOUFLAGE_WAS_MANAGED=1
+fi
+
 if command -v docker >/dev/null 2>&1 && [[ -f "${OCSERV_COMPOSE_FILE}" && -f "${OCSERV_ENV_FILE}" ]]; then
   if [[ "${PURGE_DATA}" == 1 ]]; then
     compose down --remove-orphans --volumes || true
@@ -53,11 +59,40 @@ rm -f \
   "${OCSERV_UI_CERT_RENEW_SCRIPT}" \
   "${OCSERV_UI_CERT_SYNC_SCRIPT}" \
   "${OCSERV_UI_CERT_DEPLOY_HOOK}" \
+  "${OCSERV_CERT_DEPLOY_HOOK}" \
   "${OCSERV_UI_ACTION_TMPFILES_FILE}" \
   "${OCSERV_UI_TMPFILES_FILE}" \
   "${OCSERV_UI_ACCESS_INFO_SCRIPT}" \
+  "${OCSERV_ACME_NGINX_LINK}" \
+  "${OCSERV_ACME_NGINX_SITE}" \
+  "${OCSERV_CAMOUFLAGE_NGINX_LINK}" \
+  "${OCSERV_CAMOUFLAGE_NGINX_SITE}" \
+  "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" \
   /etc/sysctl.d/99-ocserv-vps.conf
+if [[ "${NGINX_CAMOUFLAGE_WAS_MANAGED}" == 1 ]]; then
+  if [[ -L "${OCSERV_CAMOUFLAGE_SITE_ROOT}" || -f "${OCSERV_CAMOUFLAGE_SITE_ROOT}" ]]; then
+    rm -f "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
+  elif [[ -d "${OCSERV_CAMOUFLAGE_SITE_ROOT}" ]]; then
+    CAMOUFLAGE_SITE_SOURCE=''
+    if [[ -f "${OCSERV_CAMOUFLAGE_SITE_METADATA}" && ! -L "${OCSERV_CAMOUFLAGE_SITE_METADATA}" ]]; then
+      CAMOUFLAGE_SITE_SOURCE="$(head -n 1 "${OCSERV_CAMOUFLAGE_SITE_METADATA}")"
+    fi
+    case "${CAMOUFLAGE_SITE_SOURCE}" in
+      template:construction | template:company | template:blog | template:status | custom-download)
+        rm -rf "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
+        ;;
+      *) warn 'Refusing to recursively remove a Camouflage website without valid managed metadata.' ;;
+    esac
+  fi
+fi
 systemctl daemon-reload >/dev/null 2>&1 || true
+if [[ "${NGINX_CAMOUFLAGE_WAS_MANAGED}" == 1 ]] && command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx; then
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx >/dev/null 2>&1 || warn 'Failed to reload nginx after removing Advanced Camouflage.'
+  else
+    warn 'nginx configuration is invalid after removing Advanced Camouflage; nginx was not reloaded.'
+  fi
+fi
 if [[ -L "${OCSERV_UI_CONTAINER_LOG_DIR}" ]]; then
   warn 'Refusing to follow a symlink at the container-log snapshot path during uninstall.'
 elif [[ -d "${OCSERV_UI_CONTAINER_LOG_DIR}" ]]; then

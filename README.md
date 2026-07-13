@@ -68,6 +68,35 @@ OCSERV_CAMOUFLAGE_REALM='Test Environment' \
 sudo -E ocserv-vps install
 ```
 
+#### Продвинутая маскировка сайтом
+
+После включения обычного Camouflage установщик может включить продвинутый TCP-only режим и предложит выбрать заглушку. Nginx занимает публичный TCP/443: браузеры с HTTP/2 получают локальный статический сайт, а OpenConnect/AnyConnect по HTTP/1.1 передаётся локальному ocserv на `127.0.0.1:8443`. TLS до ocserv не завершается на Nginx, реальный IP клиента передаётся через PROXY protocol, а секрет из URL продолжает проверять сам ocserv.
+
+Доступны четыре встроенных варианта: `construction` (технические работы), `company` (корпоративная страница), `blog` (личный блог) и `status` (статус сервисов). Пятый вариант `custom` скачивает пользовательскую заглушку по `OCSERV_CAMOUFLAGE_SITE_URL`. Это ссылка на файл для однократного скачивания при установке, а не адрес reverse proxy. Поддерживаются ZIP, TAR/TAR.GZ и отдельный HTML-файл с корневым `index.html`.
+
+```bash
+OCSERV_CAMOUFLAGE=1 \
+OCSERV_ADVANCED_CAMOUFLAGE=1 \
+OCSERV_CAMOUFLAGE_SITE_TEMPLATE=company \
+sudo -E ocserv-vps install
+```
+
+Для наиболее продвинутого пользовательского варианта:
+
+```bash
+OCSERV_CAMOUFLAGE=1 \
+OCSERV_ADVANCED_CAMOUFLAGE=1 \
+OCSERV_CAMOUFLAGE_SITE_TEMPLATE=custom \
+OCSERV_CAMOUFLAGE_SITE_URL='https://downloads.example/vpn-cover.zip' \
+sudo -E ocserv-vps install
+```
+
+Custom URL должен возвращать файл напрямую по HTTPS без redirect, не содержать credentials/fragment и разрешаться только в публичные IPv4-адреса, отличные от VPN endpoint. Размер скачивания и распакованного сайта ограничен 10 MiB и 1000 файлами; ссылки, специальные файлы и небезопасные пути в архиве отклоняются. URL не сохраняется в Nginx или state. Используйте только сайт, который вы вправе размещать.
+
+В этом режиме UDP/DTLS намеренно отключён: UDP/443 не открывается в firewall, а в конфигурации ocserv устанавливается `no-udp = true`. Режим требует публичный порт `443`.
+
+Маршрутизация браузера основана на ALPN HTTP/2. HTTP/1.1-браузер или специально сформированный probe попадёт на нативный ответ Camouflage ocserv (404/401), поэтому режим повышает правдоподобность обычного посещения, но не обещает неотличимость от веб-сервера при активном анализе.
+
 Конкретную версию менеджера можно указать аргументом:
 
 ```bash

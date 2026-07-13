@@ -15,7 +15,9 @@ Usage: remote-bootstrap-vps.sh --domain <fqdn> --acme-email <email>
   --image <ghcr.io/owner/image:version>
   --vpn-network <cidr> --vpn-port <port> --ssh-port <port>
   --approve-firewall --approve-restart [--prepare-nginx] [--camouflage]
-Camouflage values are received through the manager's protected environment handoff.
+  [--advanced-camouflage --camouflage-site-template <name>]
+  [--camouflage-site-url <direct-https-download>]
+Camouflage secret, realm, and custom download URL use the manager's protected environment handoff.
 EOF
 }
 
@@ -34,6 +36,9 @@ PREPARE_NGINX="0"
 CAMOUFLAGE="0"
 CAMOUFLAGE_SECRET="${OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET:-}"
 CAMOUFLAGE_REALM="${OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM:-}"
+ADVANCED_CAMOUFLAGE="0"
+CAMOUFLAGE_SITE_TEMPLATE="construction"
+CAMOUFLAGE_SITE_URL="${OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL:-}"
 APPROVE_FIREWALL="0"
 APPROVE_RESTART="0"
 
@@ -51,6 +56,9 @@ while [[ $# -gt 0 ]]; do
     --ssh-port) SSH_PORT="${2:-}"; shift 2 ;;
     --public-interface) PUBLIC_INTERFACE="${2:-}"; shift 2 ;;
     --camouflage) CAMOUFLAGE="1"; shift ;;
+    --advanced-camouflage) ADVANCED_CAMOUFLAGE="1"; shift ;;
+    --camouflage-site-template) CAMOUFLAGE_SITE_TEMPLATE="${2:-}"; shift 2 ;;
+    --camouflage-site-url) CAMOUFLAGE_SITE_URL="${2:-}"; shift 2 ;;
     --prepare-nginx) PREPARE_NGINX="1"; shift ;;
     --approve-firewall) APPROVE_FIREWALL="1"; shift ;;
     --approve-restart) APPROVE_RESTART="1"; shift ;;
@@ -79,7 +87,26 @@ else
   [[ -z "${CAMOUFLAGE_SECRET}" && -z "${CAMOUFLAGE_REALM}" ]] || \
     die 'Camouflage settings require --camouflage.'
 fi
-unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  [[ "${CAMOUFLAGE}" == "1" ]] || die 'Advanced Camouflage requires --camouflage.'
+  [[ "${VPN_PORT}" == 443 ]] || die 'Advanced Camouflage requires public VPN port 443.'
+  validate_camouflage_site_template "${CAMOUFLAGE_SITE_TEMPLATE}"
+  if [[ "${CAMOUFLAGE_SITE_TEMPLATE}" == custom ]]; then
+    [[ -n "${CAMOUFLAGE_SITE_URL}" ]] || \
+      die '--camouflage-site-url is required for the custom Camouflage website.'
+    validate_camouflage_download_url "${CAMOUFLAGE_SITE_URL}"
+  else
+    [[ -z "${CAMOUFLAGE_SITE_URL}" ]] || \
+      die '--camouflage-site-url requires --camouflage-site-template custom.'
+  fi
+  PREPARE_NGINX="1"
+else
+  [[ -z "${CAMOUFLAGE_SITE_URL}" ]] || die '--camouflage-site-url requires --advanced-camouflage.'
+  [[ "${CAMOUFLAGE_SITE_TEMPLATE}" == construction ]] || \
+    die '--camouflage-site-template requires --advanced-camouflage.'
+fi
+unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM \
+  OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL
 
 [[ -r /etc/os-release ]] || die '/etc/os-release is unavailable.'
 OS_ID="$(. /etc/os-release; printf '%s' "${ID:-}")"
@@ -91,10 +118,15 @@ case "${OS_ID}" in debian|ubuntu) ;; *) die "Unsupported OS: ${OS_ID:-unknown}" 
 acquire_stack_locks
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends \
-  ca-certificates curl python3 openssl certbot iproute2 iptables \
+INSTALL_PACKAGES=(
+  ca-certificates curl python3 openssl certbot iproute2 iptables
   openconnect vpnc-scripts
+)
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  INSTALL_PACKAGES+=(nginx libnginx-mod-stream)
+fi
+apt-get update
+apt-get install -y --no-install-recommends "${INSTALL_PACKAGES[@]}"
 install_docker_engine
 
 if [[ "${CAMOUFLAGE}" == "1" && -z "${CAMOUFLAGE_SECRET}" ]]; then
@@ -108,6 +140,11 @@ fi
 validate_interface "${PUBLIC_INTERFACE}"
 ip link show "${PUBLIC_INTERFACE}" >/dev/null 2>&1 || die "Public interface not found: ${PUBLIC_INTERFACE}"
 getent ahostsv4 "${DOMAIN}" >/dev/null 2>&1 || die "Domain does not resolve to IPv4: ${DOMAIN}"
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  for port in "${VPN_PORT}" "${OCSERV_CAMOUFLAGE_TCP_PORT}" "${OCSERV_CAMOUFLAGE_WEB_PORT}"; do
+    listener_exists tcp "${port}" && die "TCP port ${port} is already occupied; Advanced Camouflage requires it."
+  done
+fi
 
 if ss -H -ltn | awk '$4 ~ /:80$/ {found=1} END {exit(found ? 0 : 1)}'; then
   if [[ "${PREPARE_NGINX}" != "1" ]]; then
@@ -122,9 +159,23 @@ install -d -m 0700 "${BOOTSTRAP_BACKUP}"
 iptables-save > "${BOOTSTRAP_BACKUP}/iptables.rules"
 ip6tables-save > "${BOOTSTRAP_BACKUP}/ip6tables.rules" 2>/dev/null || true
 sysctl -n net.ipv4.ip_forward > "${BOOTSTRAP_BACKUP}/ipv4-forwarding" 2>/dev/null || printf '0\n' > "${BOOTSTRAP_BACKUP}/ipv4-forwarding"
-for path in /etc/sysctl.d/99-ocserv-vps.conf "${OCSERV_NETWORK_SCRIPT}" "${OCSERV_NETWORK_SERVICE}"; do
-  [[ ! -e "${path}" ]] || cp -a "${path}" "${BOOTSTRAP_BACKUP}/"
+for pair in \
+  "/etc/sysctl.d/99-ocserv-vps.conf:99-ocserv-vps.conf" \
+  "${OCSERV_NETWORK_SCRIPT}:apply-network.sh" \
+  "${OCSERV_NETWORK_SERVICE}:ocserv-vps-network.service" \
+  "${OCSERV_ACME_NGINX_SITE}:nginx-acme-site.conf" \
+  "${OCSERV_ACME_NGINX_LINK}:nginx-acme-link.conf" \
+  "${OCSERV_CAMOUFLAGE_NGINX_SITE}:nginx-camouflage-site.conf" \
+  "${OCSERV_CAMOUFLAGE_NGINX_LINK}:nginx-camouflage-link.conf" \
+  "${OCSERV_CAMOUFLAGE_NGINX_STREAM}:nginx-camouflage-stream.conf"; do
+  original="${pair%%:*}"
+  saved="${BOOTSTRAP_BACKUP}/${pair#*:}"
+  [[ ! -e "${original}" && ! -L "${original}" ]] || cp -a "${original}" "${saved}"
 done
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" && \
+      ( -e "${OCSERV_CAMOUFLAGE_SITE_ROOT}" || -L "${OCSERV_CAMOUFLAGE_SITE_ROOT}" ) ]]; then
+  cp -a "${OCSERV_CAMOUFLAGE_SITE_ROOT}" "${BOOTSTRAP_BACKUP}/camouflage-site-root"
+fi
 
 BOOTSTRAP_COMMITTED="0"
 rollback_bootstrap() {
@@ -142,14 +193,33 @@ rollback_bootstrap() {
   for pair in \
     "${OCSERV_NETWORK_SERVICE}:ocserv-vps-network.service" \
     "${OCSERV_NETWORK_SCRIPT}:apply-network.sh" \
-    "/etc/sysctl.d/99-ocserv-vps.conf:99-ocserv-vps.conf"; do
+    "/etc/sysctl.d/99-ocserv-vps.conf:99-ocserv-vps.conf" \
+    "${OCSERV_ACME_NGINX_SITE}:nginx-acme-site.conf" \
+    "${OCSERV_ACME_NGINX_LINK}:nginx-acme-link.conf" \
+    "${OCSERV_CAMOUFLAGE_NGINX_SITE}:nginx-camouflage-site.conf" \
+    "${OCSERV_CAMOUFLAGE_NGINX_LINK}:nginx-camouflage-link.conf" \
+    "${OCSERV_CAMOUFLAGE_NGINX_STREAM}:nginx-camouflage-stream.conf"; do
     original="${pair%%:*}"
     saved="${BOOTSTRAP_BACKUP}/${pair#*:}"
-    if [[ -f "${saved}" ]]; then cp -a "${saved}" "${original}"; else rm -f "${original}"; fi
+    if [[ -e "${saved}" || -L "${saved}" ]]; then
+      rm -f "${original}"
+      cp -a "${saved}" "${original}"
+    else
+      rm -f "${original}"
+    fi
   done
+  if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+    rm -rf "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
+    if [[ -e "${BOOTSTRAP_BACKUP}/camouflage-site-root" || -L "${BOOTSTRAP_BACKUP}/camouflage-site-root" ]]; then
+      cp -a "${BOOTSTRAP_BACKUP}/camouflage-site-root" "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
+    fi
+  fi
   sysctl -w "net.ipv4.ip_forward=$(cat "${BOOTSTRAP_BACKUP}/ipv4-forwarding")" >/dev/null 2>&1
   rm -f /root/ocserv-vps-initial-credentials
   systemctl daemon-reload >/dev/null 2>&1
+  if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx; then
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1
+  fi
   set -e
 }
 on_exit() {
@@ -166,7 +236,7 @@ pull_verified_image "${IMAGE}" "${VERSION}"
 IMAGE="${RESOLVED_IMAGE}"
 
 render_ocserv_config "${DOMAIN}" "${VPN_NETWORK}" "${VPN_PORT}" "${DNS_PRIMARY}" "${DNS_SECONDARY}" \
-  "${CAMOUFLAGE}" "${CAMOUFLAGE_SECRET}" "${CAMOUFLAGE_REALM}"
+  "${CAMOUFLAGE}" "${CAMOUFLAGE_SECRET}" "${CAMOUFLAGE_REALM}" "${ADVANCED_CAMOUFLAGE}"
 VPN_SERVER_URL="$(ocserv_connection_url "${DOMAIN}" "${VPN_PORT}")"
 render_compose_file
 write_stack_env "${IMAGE}"
@@ -181,19 +251,30 @@ server=${VPN_SERVER_URL}
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
-render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}"
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 0
+else
+  render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 1
+fi
+
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  install_camouflage_site "${CAMOUFLAGE_SITE_TEMPLATE}" "${CAMOUFLAGE_SITE_URL}" "${DOMAIN}"
+  CAMOUFLAGE_SITE_URL=''
+  unset CAMOUFLAGE_DOWNLOAD_URL CAMOUFLAGE_DOWNLOAD_AUTHORITY \
+    CAMOUFLAGE_DOWNLOAD_HOST CAMOUFLAGE_DOWNLOAD_PORT
+fi
 
 if [[ "${PREPARE_NGINX}" == "1" ]]; then
   apt-get install -y --no-install-recommends nginx
-  install -d -m 0755 /var/www/ocserv-acme/.well-known/acme-challenge
-  cat > /etc/nginx/sites-available/ocserv-ui-bootstrap.conf <<EOF
+  install -d -m 0755 "${OCSERV_ACME_WEBROOT}/.well-known/acme-challenge"
+  cat > "${OCSERV_ACME_NGINX_SITE}" <<EOF
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
 
     location ^~ /.well-known/acme-challenge/ {
-        root /var/www/ocserv-acme;
+        root ${OCSERV_ACME_WEBROOT};
         default_type text/plain;
     }
 
@@ -202,11 +283,11 @@ server {
     }
 }
 EOF
-  ln -sfn /etc/nginx/sites-available/ocserv-ui-bootstrap.conf /etc/nginx/sites-enabled/ocserv-ui-bootstrap.conf
+  ln -sfn "${OCSERV_ACME_NGINX_SITE}" "${OCSERV_ACME_NGINX_LINK}"
   nginx -t
   systemctl enable --now nginx
   systemctl reload nginx
-  certbot certonly --webroot -w /var/www/ocserv-acme \
+  certbot certonly --webroot -w "${OCSERV_ACME_WEBROOT}" \
     --non-interactive --agree-tos --keep-until-expiring \
     --email "${ACME_EMAIL}" -d "${DOMAIN}"
 else
@@ -215,20 +296,33 @@ else
     --email "${ACME_EMAIL}" -d "${DOMAIN}"
 fi
 
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  render_advanced_camouflage_nginx "${DOMAIN}" "${VPN_PORT}"
+  nginx -t
+  systemctl reload nginx
+fi
+
 install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
-cat > /etc/letsencrypt/renewal-hooks/deploy/ocserv-vps-reload.sh <<'EOF'
+cat > "${OCSERV_CERT_DEPLOY_HOOK}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if docker inspect ocserv-vps >/dev/null 2>&1; then
   docker kill --signal HUP ocserv-vps >/dev/null || docker restart ocserv-vps >/dev/null
 fi
+if [[ -f /etc/nginx/modules-enabled/90-ocserv-vps-camouflage-stream.conf ]]; then
+  nginx -t
+  systemctl reload nginx
+fi
 EOF
-chmod 0750 /etc/letsencrypt/renewal-hooks/deploy/ocserv-vps-reload.sh
+chmod 0750 "${OCSERV_CERT_DEPLOY_HOOK}"
 
 test_image_config "${IMAGE}"
 compose up -d --remove-orphans
 health_check_stack "${IMAGE}" "${VPN_PORT}" 60 || die 'Initial container health check failed.'
 verify_openconnect_data_path "${DOMAIN}" "${VPN_PORT}" "${VPN_USERNAME}" "${GENERATED_VPN_PASSWORD}"
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  verify_advanced_camouflage_site "${DOMAIN}"
+fi
 write_state "${VERSION}" "${IMAGE}" "" "" "${DOMAIN}" "${VPN_NETWORK}" "${VPN_PORT}" \
   "${RESOLVED_SOURCE_SHA}" "${BOOTSTRAP_BACKUP}"
 

@@ -29,6 +29,9 @@ CURRENT_IMAGE="$(state_get current_image)"
 VPN_PORT="$(state_get vpn_port)"
 DOMAIN="$(state_get domain)"
 OPENCONNECT_CHECKED_AT="$(state_get openconnect_checked_at)"
+OCSERV_TCP_PORT="$(ocserv_config_value tcp-port)"
+OCSERV_UDP_PORT="$(ocserv_config_value udp-port)"
+OCSERV_NO_UDP="$(ocserv_config_value no-udp false)"
 
 printf 'Last mandatory OpenConnect check: %s\n' "${OPENCONNECT_CHECKED_AT:-not recorded}"
 
@@ -46,11 +49,39 @@ else
 fi
 
 printf '\n%s\n' '=== Listeners ==='
-printf 'TCP %s: ' "${VPN_PORT}"
+printf 'Public TCP %s: ' "${VPN_PORT}"
 if listener_exists tcp "${VPN_PORT}"; then printf 'listening\n'; else printf 'MISSING\n'; fi
-printf 'UDP %s: ' "${VPN_PORT}"
-if listener_exists udp "${VPN_PORT}"; then printf 'listening\n'; else printf 'MISSING\n'; fi
-ss -ltnup | grep -E ":(${VPN_PORT}|80)[[:space:]]" || true
+if [[ "${OCSERV_TCP_PORT}" != "${VPN_PORT}" ]]; then
+  printf 'Local ocserv TCP %s: ' "${OCSERV_TCP_PORT}"
+  if listener_exists tcp "${OCSERV_TCP_PORT}"; then printf 'listening\n'; else printf 'MISSING\n'; fi
+fi
+if [[ "${OCSERV_NO_UDP,,}" == true ]]; then
+  printf '%s\n' 'UDP/DTLS: disabled'
+else
+  printf 'UDP %s: ' "${OCSERV_UDP_PORT}"
+  if listener_exists udp "${OCSERV_UDP_PORT}"; then printf 'listening\n'; else printf 'MISSING\n'; fi
+fi
+ss -ltnup | grep -E ":(${VPN_PORT}|${OCSERV_TCP_PORT}|${OCSERV_CAMOUFLAGE_WEB_PORT}|80)[[:space:]]" || true
+
+printf '\n%s\n' '=== Advanced Camouflage ==='
+if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" && -f "${OCSERV_CAMOUFLAGE_NGINX_SITE}" ]]; then
+  printf '%s\n' 'Mode: TCP-only nginx ALPN routing'
+  if [[ -f "${OCSERV_CAMOUFLAGE_SITE_METADATA}" && ! -L "${OCSERV_CAMOUFLAGE_SITE_METADATA}" ]]; then
+    CAMOUFLAGE_SITE_SOURCE="$(head -n 1 "${OCSERV_CAMOUFLAGE_SITE_METADATA}")"
+    case "${CAMOUFLAGE_SITE_SOURCE}" in
+      template:construction | template:company | template:blog | template:status | custom-download)
+        printf 'Website source: %s\n' "${CAMOUFLAGE_SITE_SOURCE}"
+        ;;
+      *) printf '%s\n' 'Website source: unknown' ;;
+    esac
+  else
+    printf '%s\n' 'Website source: metadata missing'
+  fi
+  systemctl is-active nginx 2>/dev/null || true
+  nginx -t 2>&1 | sed -n '1,5p' || true
+else
+  printf '%s\n' 'Mode: disabled'
+fi
 
 printf '\n%s\n' '=== Network and firewall ==='
 printf 'IPv4 forwarding: %s\n' "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || printf unknown)"

@@ -121,7 +121,8 @@ fi
 tar -xzf "${archive}" -C "${unpack}"
 
 source_root="$(find "${unpack}" -mindepth 1 -maxdepth 1 -type d -name 'ocserv-vps-*' -print -quit)"
-[[ -n "${source_root}" && -f "${source_root}/ocserv-vps.sh" && -d "${source_root}/scripts" ]] || {
+[[ -n "${source_root}" && -f "${source_root}/ocserv-vps.sh" && -d "${source_root}/scripts" && \
+   -d "${source_root}/assets/camouflage-sites" ]] || {
   echo -e "${red}Release archive does not contain the ocserv-vps runtime.${plain}" >&2
   exit 1
 }
@@ -131,6 +132,7 @@ old_root="${install_root}.old.$$"
 rm -rf "${new_root}" "${old_root}"
 install -d -m 0755 "${new_root}"
 cp -a "${source_root}/scripts" "${new_root}/scripts"
+cp -a "${source_root}/assets" "${new_root}/assets"
 install -m 0755 "${source_root}/ocserv-vps.sh" "${new_root}/ocserv-vps.sh"
 if [[ -f "${source_root}/VERSION" ]]; then
   install -m 0644 "${source_root}/VERSION" "${new_root}/VERSION"

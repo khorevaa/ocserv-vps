@@ -146,6 +146,32 @@ prompt_yes_no() {
   esac
 }
 
+prompt_camouflage_site_template() {
+  local variable="$1" value
+  if [[ ${noninteractive} -eq 1 ]]; then
+    value="${OCSERV_CAMOUFLAGE_SITE_TEMPLATE:-construction}"
+  else
+    printf '%s\n' \
+      'Camouflage website:' \
+      '  1) Under construction' \
+      '  2) Company landing page' \
+      '  3) Personal blog' \
+      '  4) Service status' \
+      '  5) Download custom static site'
+    read -r -p 'Select a website [1]: ' value
+    value="${value:-1}"
+  fi
+  case "${value,,}" in
+    1 | construction) value='construction' ;;
+    2 | company) value='company' ;;
+    3 | blog) value='blog' ;;
+    4 | status) value='status' ;;
+    5 | custom) value='custom' ;;
+    *) die 'OCSERV_CAMOUFLAGE_SITE_TEMPLATE must be construction, company, blog, status, or custom' ;;
+  esac
+  printf -v "${variable}" '%s' "${value}"
+}
+
 require_approval() {
   local label="$1" env_name="$2"
   if [[ ${noninteractive} -eq 1 ]]; then
@@ -195,14 +221,17 @@ install_stack() {
   [[ ! -e "${state_file}" ]] || die 'a managed stack already exists; use update commands'
 
   local domain email username version image vpn_network vpn_port dns_primary dns_secondary
-  local public_interface ssh_port ui_version camouflage_secret='' camouflage_realm='' prepare_nginx=0 install_ui=0 camouflage=0
+  local public_interface ssh_port ui_version camouflage_secret='' camouflage_realm=''
+  local camouflage_site_template='' camouflage_site_url=''
+  local advanced_answer
+  local prepare_nginx=0 install_ui=0 camouflage=0 advanced_camouflage=0
   prompt_value domain 'VPN domain' '' OCSERV_DOMAIN
   prompt_value email 'ACME email' '' OCSERV_ACME_EMAIL
   prompt_value username 'Initial VPN username' 'vpnuser' OCSERV_VPN_USERNAME
   prompt_image_version version 'ocserv image version' OCSERV_VERSION \
     khorevaa/ocserv-vps-server
   prompt_value vpn_network 'VPN IPv4 network' '10.66.0.0/24' OCSERV_VPN_NETWORK
-  prompt_value vpn_port 'VPN TCP/UDP port' '443' OCSERV_VPN_PORT
+  prompt_value vpn_port 'Public VPN port' '443' OCSERV_VPN_PORT
   prompt_value dns_primary 'Primary DNS' '1.1.1.1' OCSERV_DNS_PRIMARY
   prompt_value dns_secondary 'Secondary DNS' '1.0.0.1' OCSERV_DNS_SECONDARY
   prompt_optional public_interface 'Public interface (empty for auto-detect)' '' OCSERV_PUBLIC_INTERFACE
@@ -211,9 +240,38 @@ install_stack() {
     camouflage=1
     prompt_optional camouflage_secret 'Camouflage secret (empty to generate securely)' '' OCSERV_CAMOUFLAGE_SECRET
     prompt_value camouflage_realm 'Camouflage realm' 'Test Environment' OCSERV_CAMOUFLAGE_REALM
+    if prompt_yes_no 'Enable advanced TCP-only website Camouflage?' 0 OCSERV_ADVANCED_CAMOUFLAGE; then
+      advanced_camouflage=1
+      prepare_nginx=1
+      prompt_camouflage_site_template camouflage_site_template
+      if [[ "${camouflage_site_template}" == custom ]]; then
+        prompt_value camouflage_site_url 'Direct HTTPS URL of the static-site archive or HTML file' '' OCSERV_CAMOUFLAGE_SITE_URL
+      elif [[ ${noninteractive} -eq 1 && -n "${OCSERV_CAMOUFLAGE_SITE_URL:-}" ]]; then
+        die 'OCSERV_CAMOUFLAGE_SITE_URL requires OCSERV_CAMOUFLAGE_SITE_TEMPLATE=custom'
+      fi
+    fi
+  elif [[ ${noninteractive} -eq 1 ]]; then
+    advanced_answer="${OCSERV_ADVANCED_CAMOUFLAGE:-0}"
+    case "${advanced_answer,,}" in
+      1 | y | yes | true | on)
+        die 'OCSERV_ADVANCED_CAMOUFLAGE=1 requires OCSERV_CAMOUFLAGE=1'
+        ;;
+      0 | n | no | false | off) ;;
+      *) die 'OCSERV_ADVANCED_CAMOUFLAGE must be yes/no or 1/0' ;;
+    esac
   fi
-  unset OCSERV_CAMOUFLAGE_SECRET OCSERV_CAMOUFLAGE_REALM
-  prompt_yes_no 'Prepare nginx ACME webroot instead of standalone ACME?' 0 OCSERV_PREPARE_NGINX && prepare_nginx=1
+  if [[ ${noninteractive} -eq 1 && ${advanced_camouflage} -eq 0 && -n "${OCSERV_CAMOUFLAGE_SITE_URL:-}" ]]; then
+    die 'OCSERV_CAMOUFLAGE_SITE_URL requires OCSERV_ADVANCED_CAMOUFLAGE=1'
+  fi
+  if [[ ${noninteractive} -eq 1 && ${advanced_camouflage} -eq 0 && \
+        -n "${OCSERV_CAMOUFLAGE_SITE_TEMPLATE:-}" ]]; then
+    die 'OCSERV_CAMOUFLAGE_SITE_TEMPLATE requires OCSERV_ADVANCED_CAMOUFLAGE=1'
+  fi
+  unset OCSERV_CAMOUFLAGE_SECRET OCSERV_CAMOUFLAGE_REALM \
+    OCSERV_CAMOUFLAGE_SITE_URL
+  if [[ ${advanced_camouflage} -eq 0 ]]; then
+    prompt_yes_no 'Prepare nginx ACME webroot instead of standalone ACME?' 0 OCSERV_PREPARE_NGINX && prepare_nginx=1
+  fi
   prompt_yes_no 'Install the private management UI?' 1 OCSERV_INSTALL_UI && install_ui=1
   require_approval 'firewall replacement' OCSERV_APPROVE_FIREWALL
   require_approval 'VPN restart and active-session interruption' OCSERV_APPROVE_RESTART
@@ -227,12 +285,19 @@ install_stack() {
   )
   [[ -z "${public_interface}" ]] || args+=(--public-interface "${public_interface}")
   [[ ${camouflage} -eq 0 ]] || args+=(--camouflage)
+  if [[ ${advanced_camouflage} -ne 0 ]]; then
+    args+=(--advanced-camouflage --camouflage-site-template "${camouflage_site_template}")
+  fi
   [[ ${prepare_nginx} -eq 0 ]] || args+=(--prepare-nginx)
   OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET="${camouflage_secret}"
   OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM="${camouflage_realm}"
-  export OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM
+  OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL="${camouflage_site_url}"
+  export OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM \
+    OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL
   runtime_task bootstrap-vps.sh "${args[@]}"
-  unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM
+  unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM \
+    OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL
+  camouflage_site_url=''
 
   if [[ ${install_ui} -eq 1 ]]; then
     prompt_image_version ui_version 'UI version' OCSERV_UI_VERSION \
@@ -440,6 +505,11 @@ OCSERV_APPROVE_FIREWALL=1, and OCSERV_APPROVE_RESTART=1.
 Set OCSERV_CAMOUFLAGE=1 to enable Camouflage; OCSERV_CAMOUFLAGE_SECRET is
 optional and defaults to a securely generated secret.
 OCSERV_CAMOUFLAGE_REALM defaults to "Test Environment".
+Set OCSERV_ADVANCED_CAMOUFLAGE=1 together with OCSERV_CAMOUFLAGE=1 and
+choose OCSERV_CAMOUFLAGE_SITE_TEMPLATE=construction|company|blog|status|custom
+to install TCP-only nginx Camouflage. For custom, set OCSERV_CAMOUFLAGE_SITE_URL
+to a direct HTTPS URL of a ZIP/TAR.GZ archive or HTML file. Advanced mode
+requires public port 443 and disables UDP/DTLS.
 Image version prompts default to the latest published immutable GHCR tag; set
 OCSERV_VERSION or OCSERV_UI_VERSION to pin a specific version.
 EOF

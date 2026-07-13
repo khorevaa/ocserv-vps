@@ -68,6 +68,35 @@ OCSERV_CAMOUFLAGE_REALM='Test Environment' \
 sudo -E ocserv-vps install
 ```
 
+#### Advanced website camouflage
+
+After native Camouflage is enabled, the installer can enable an advanced TCP-only mode and offer a cover-site choice. Nginx owns public TCP/443: HTTP/2 browsers receive a local static website, while HTTP/1.1 OpenConnect/AnyConnect traffic is passed to ocserv on `127.0.0.1:8443`. Nginx does not terminate the ocserv TLS connection, the client address is preserved with PROXY protocol, and ocserv still validates the URL secret.
+
+Four built-in choices are available: `construction`, `company`, `blog`, and `status`. A fifth `custom` choice downloads a user-supplied cover site from `OCSERV_CAMOUFLAGE_SITE_URL`. The URL is used once during installation to download a file; it is not a reverse-proxy origin. ZIP, TAR/TAR.GZ, and standalone HTML downloads are supported and must produce a root `index.html`.
+
+```bash
+OCSERV_CAMOUFLAGE=1 \
+OCSERV_ADVANCED_CAMOUFLAGE=1 \
+OCSERV_CAMOUFLAGE_SITE_TEMPLATE=company \
+sudo -E ocserv-vps install
+```
+
+For the most advanced custom choice:
+
+```bash
+OCSERV_CAMOUFLAGE=1 \
+OCSERV_ADVANCED_CAMOUFLAGE=1 \
+OCSERV_CAMOUFLAGE_SITE_TEMPLATE=custom \
+OCSERV_CAMOUFLAGE_SITE_URL='https://downloads.example/vpn-cover.zip' \
+sudo -E ocserv-vps install
+```
+
+The custom URL must return the file directly over HTTPS without a redirect, contain no credentials or fragment, and resolve only to public IPv4 addresses different from the VPN endpoint. Both the download and unpacked website are limited to 10 MiB and 1,000 entries; links, special files, and unsafe archive paths are rejected. The URL is not persisted in Nginx or state. Only deploy content you are authorized to use.
+
+UDP/DTLS is intentionally disabled in this mode: UDP/443 is not opened in the firewall and ocserv receives `no-udp = true`. Public port `443` is required.
+
+Browser routing relies on HTTP/2 ALPN. An HTTP/1.1-only browser or a purpose-built probe reaches ocserv's native Camouflage response (404/401), so this mode improves the appearance of ordinary browsing but does not claim to be indistinguishable under active analysis.
+
 Pass a tag to install a specific manager release:
 
 ```bash

@@ -3,6 +3,9 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 027
 
+OCSERV_RUNTIME_SCRIPTS_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+OCSERV_RUNTIME_ROOT="$(CDPATH= cd -- "${OCSERV_RUNTIME_SCRIPTS_DIR}/.." && pwd)"
+
 OCSERV_STACK_ROOT="/opt/ocserv-vps"
 OCSERV_CONFIG_DIR="${OCSERV_STACK_ROOT}/config"
 OCSERV_COMPOSE_FILE="${OCSERV_STACK_ROOT}/compose.yaml"
@@ -49,6 +52,21 @@ OCSERV_LOCK="${OCSERV_STACK_ROOT}/locks/operation.lock"
 OCSERV_CONTAINER="ocserv-vps"
 OCSERV_NETWORK_SCRIPT="${OCSERV_BIN_DIR}/apply-network.sh"
 OCSERV_NETWORK_SERVICE="/etc/systemd/system/ocserv-vps-network.service"
+OCSERV_CERT_DEPLOY_HOOK="/etc/letsencrypt/renewal-hooks/deploy/ocserv-vps-reload.sh"
+OCSERV_ACME_WEBROOT="/var/www/ocserv-acme"
+OCSERV_ACME_NGINX_SITE="/etc/nginx/sites-available/ocserv-ui-bootstrap.conf"
+OCSERV_ACME_NGINX_LINK="/etc/nginx/sites-enabled/ocserv-ui-bootstrap.conf"
+OCSERV_CAMOUFLAGE_NGINX_SITE="/etc/nginx/sites-available/ocserv-vps-camouflage.conf"
+OCSERV_CAMOUFLAGE_NGINX_LINK="/etc/nginx/sites-enabled/ocserv-vps-camouflage.conf"
+OCSERV_CAMOUFLAGE_NGINX_STREAM="/etc/nginx/modules-enabled/90-ocserv-vps-camouflage-stream.conf"
+OCSERV_NGINX_STREAM_MODULE_CONFIG="/etc/nginx/modules-enabled/50-mod-stream.conf"
+OCSERV_LETSENCRYPT_LIVE_ROOT="/etc/letsencrypt/live"
+OCSERV_CAMOUFLAGE_TEMPLATE_ROOT="${OCSERV_RUNTIME_ROOT}/assets/camouflage-sites"
+OCSERV_CAMOUFLAGE_EXTRACTOR="${OCSERV_RUNTIME_SCRIPTS_DIR}/extract-camouflage-site.py"
+OCSERV_CAMOUFLAGE_SITE_ROOT="/var/www/ocserv-camouflage"
+OCSERV_CAMOUFLAGE_SITE_METADATA="${OCSERV_CAMOUFLAGE_SITE_ROOT}/.ocserv-vps-source"
+OCSERV_CAMOUFLAGE_TCP_PORT="8443"
+OCSERV_CAMOUFLAGE_WEB_PORT="8444"
 
 info() { printf '[ocserv-vps] %s\n' "$*"; }
 warn() { printf '[ocserv-vps] WARNING: %s\n' "$*" >&2; }
@@ -509,6 +527,77 @@ validate_camouflage_realm() {
     die 'Camouflage realm must contain 1-64 safe characters and start with a letter or digit.'
 }
 
+validate_camouflage_site_template() {
+  case "$1" in
+    construction | company | blog | status | custom) ;;
+    *) die 'Camouflage site template must be construction, company, blog, status, or custom.' ;;
+  esac
+}
+
+validate_camouflage_download_url() {
+  local url="$1" remainder authority host port='443'
+  [[ "${url}" == https://* ]] || die 'Camouflage download URL must use HTTPS.'
+  [[ "${url}" != *[[:space:]]* ]] || die 'Camouflage download URL must not contain whitespace.'
+  remainder="${url#https://}"
+  [[ -n "${remainder}" && "${remainder}" != *'#'* ]] || \
+    die 'Camouflage download URL must not contain a fragment.'
+  authority="${remainder%%/*}"
+  authority="${authority%%\?*}"
+  [[ -n "${authority}" && "${authority}" != *'@'* && "${authority}" != *:*:* ]] || \
+    die 'Camouflage download URL has an unsafe authority or credentials.'
+  host="${authority%%:*}"
+  validate_domain "${host}"
+  if [[ "${authority}" == *:* ]]; then
+    port="${authority##*:}"
+    validate_port 'Camouflage download port' "${port}"
+  fi
+  CAMOUFLAGE_DOWNLOAD_URL="${url}"
+  CAMOUFLAGE_DOWNLOAD_AUTHORITY="${authority}"
+  CAMOUFLAGE_DOWNLOAD_HOST="${host}"
+  CAMOUFLAGE_DOWNLOAD_PORT="${port}"
+}
+
+ocserv_config_value() {
+  local key="$1" default_value="${2:-}" config="${OCSERV_CONFIG_DIR}/ocserv.conf" count value
+  [[ "${key}" =~ ^[a-z][a-z0-9-]*$ ]] || die 'Unsafe ocserv configuration key.'
+  [[ -f "${config}" && ! -L "${config}" ]] || die 'The managed ocserv configuration is missing or unsafe.'
+  count="$(awk -F= -v wanted="${key}" '
+    {
+      line=$0
+      sub(/#.*/, "", line)
+      split(line, parts, "=")
+      candidate=parts[1]
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", candidate)
+      if (candidate == wanted) count++
+    }
+    END {print count+0}
+  ' "${config}")"
+  if [[ "${count}" == 0 && $# -ge 2 ]]; then
+    printf '%s\n' "${default_value}"
+    return 0
+  fi
+  [[ "${count}" == 1 ]] || die "Expected exactly one ${key} entry in the managed ocserv configuration."
+  value="$(awk -F= -v wanted="${key}" '
+    {
+      line=$0
+      sub(/#.*/, "", line)
+      separator=index(line, "=")
+      if (!separator) next
+      candidate=substr(line, 1, separator-1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", candidate)
+      if (candidate == wanted) {
+        value=substr(line, separator+1)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        print value
+      }
+    }
+  ' "${config}")"
+  if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s\n' "${value}"
+}
+
 ocserv_connection_url() {
   local domain="$1" vpn_port="$2" config="${OCSERV_CONFIG_DIR}/ocserv.conf"
   local line key value enabled='' secret='' base
@@ -883,15 +972,29 @@ listener_exists() {
 
 health_check_stack() {
   local expected_image="$1" vpn_port="$2" timeout_seconds="$3"
-  local expected_id actual_id deadline
+  local expected_id actual_id deadline tcp_port udp_port no_udp tcp_ready udp_ready
+  tcp_port="$(ocserv_config_value tcp-port)"
+  udp_port="$(ocserv_config_value udp-port)"
+  no_udp="$(ocserv_config_value no-udp false)"
+  validate_port 'ocserv TCP port' "${tcp_port}"
+  validate_port 'ocserv UDP port' "${udp_port}"
+  case "${no_udp,,}" in true | false) ;; *) die 'Invalid no-udp value in the managed ocserv configuration.' ;; esac
   expected_id="$(docker image inspect --format '{{.Id}}' "${expected_image}")"
   deadline=$((SECONDS + timeout_seconds))
   while (( SECONDS < deadline )); do
     if [[ "$(docker inspect --format '{{.State.Running}}' "${OCSERV_CONTAINER}" 2>/dev/null || true)" == "true" ]]; then
       actual_id="$(docker inspect --format '{{.Image}}' "${OCSERV_CONTAINER}" 2>/dev/null || true)"
-      if [[ "${actual_id}" == "${expected_id}" ]] && listener_exists tcp "${vpn_port}" && listener_exists udp "${vpn_port}" && \
+      tcp_ready=0
+      udp_ready=0
+      if listener_exists tcp "${tcp_port}" && listener_exists tcp "${vpn_port}"; then tcp_ready=1; fi
+      if [[ "${no_udp,,}" == true ]] || listener_exists udp "${udp_port}"; then udp_ready=1; fi
+      if [[ "${actual_id}" == "${expected_id}" && "${tcp_ready}" == 1 && "${udp_ready}" == 1 ]] && \
         docker exec "${OCSERV_CONTAINER}" /usr/local/sbin/ocserv --version >/dev/null 2>&1; then
-        info "Health check passed for ${expected_image}: TCP and UDP ${vpn_port} are listening."
+        if [[ "${no_udp,,}" == true ]]; then
+          info "Health check passed for ${expected_image}: public TCP ${vpn_port}, local ocserv TCP ${tcp_port}, DTLS disabled."
+        else
+          info "Health check passed for ${expected_image}: TCP ${tcp_port} and UDP ${udp_port} are listening."
+        fi
         return 0
       fi
     fi
@@ -948,6 +1051,8 @@ health_check_ui_stack() {
 render_ocserv_config() {
   local domain="$1" vpn_network="$2" vpn_port="$3" dns_primary="$4" dns_secondary="$5"
   local camouflage="${6:-0}" camouflage_secret="${7:-}" camouflage_realm="${8:-}"
+  local advanced_camouflage="${9:-0}" tcp_port="${vpn_port}" listen_host='0.0.0.0'
+  local transport_config='no-udp = false'
   local camouflage_config='camouflage = false'
   case "${camouflage}" in
     0 | false)
@@ -963,12 +1068,24 @@ camouflage_realm = \"${camouflage_realm}\""
       ;;
     *) die 'Camouflage must be enabled or disabled.' ;;
   esac
+  case "${advanced_camouflage}" in
+    0 | false) ;;
+    1 | true)
+      [[ "${camouflage}" == 1 || "${camouflage}" == true ]] || \
+        die 'Advanced Camouflage requires native ocserv Camouflage.'
+      tcp_port="${OCSERV_CAMOUFLAGE_TCP_PORT}"
+      listen_host='127.0.0.1'
+      transport_config="no-udp = true
+listen-proxy-proto = true"
+      ;;
+    *) die 'Advanced Camouflage must be enabled or disabled.' ;;
+  esac
   install -d -m 0750 "${OCSERV_CONFIG_DIR}"
   cat > "${OCSERV_CONFIG_DIR}/ocserv.conf" <<EOF
 auth = "plain[passwd=/etc/ocserv/ocpasswd]"
-tcp-port = ${vpn_port}
-udp-port = ${vpn_port}
-listen-host = 0.0.0.0
+tcp-port = ${tcp_port}
+udp-port = ${tcp_port}
+listen-host = ${listen_host}
 run-as-user = ocserv
 run-as-group = ocserv
 socket-file = /run/ocserv/ocserv.sock
@@ -1002,10 +1119,180 @@ dns = ${dns_secondary}
 route = default
 tunnel-all-dns = true
 cisco-client-compat = true
+${transport_config}
 ${camouflage_config}
 EOF
   chmod 0640 "${OCSERV_CONFIG_DIR}/ocserv.conf"
   render_vpn_journal_assets
+}
+
+install_camouflage_site() (
+  set -euo pipefail
+  local template="$1" download_url="${2:-}" vpn_domain="$3"
+  local stage workdir='' archive='' source_label http_code='' address downloaded=0
+  local -a download_addresses=()
+  validate_camouflage_site_template "${template}"
+  validate_domain "${vpn_domain}"
+  install -d -m 0755 "$(dirname "${OCSERV_CAMOUFLAGE_SITE_ROOT}")"
+  stage="$(mktemp -d "$(dirname "${OCSERV_CAMOUFLAGE_SITE_ROOT}")/.ocserv-camouflage.XXXXXX")"
+  cleanup_camouflage_site_install() {
+    [[ -z "${stage}" ]] || rm -rf "${stage}"
+    [[ -z "${workdir}" ]] || rm -rf "${workdir}"
+  }
+  trap cleanup_camouflage_site_install EXIT
+
+  if [[ "${template}" == custom ]]; then
+    [[ -n "${download_url}" ]] || die 'Custom Camouflage site requires a download URL.'
+    validate_camouflage_download_url "${download_url}"
+    [[ -f "${OCSERV_CAMOUFLAGE_EXTRACTOR}" && ! -L "${OCSERV_CAMOUFLAGE_EXTRACTOR}" ]] || \
+      die 'The Camouflage site extractor is missing or unsafe.'
+    mapfile -t download_addresses < <(
+      getent ahostsv4 "${CAMOUFLAGE_DOWNLOAD_HOST}" | awk '$2 == "STREAM" {print $1}' | sort -u
+    )
+    (( ${#download_addresses[@]} > 0 )) || \
+      die "Camouflage download host does not resolve to IPv4: ${CAMOUFLAGE_DOWNLOAD_HOST}"
+    python3 - "${download_addresses[@]}" <<'PY' || \
+      die 'Camouflage download host must resolve only to public IPv4 addresses.'
+import ipaddress
+import sys
+
+if not all(ipaddress.ip_address(value).is_global for value in sys.argv[1:]):
+    raise SystemExit(1)
+PY
+    if comm -12 \
+        <(getent ahostsv4 "${vpn_domain}" | awk '$2 == "STREAM" {print $1}' | sort -u) \
+        <(printf '%s\n' "${download_addresses[@]}" | sort -u) | grep -q .; then
+      die 'Camouflage download host resolves to the VPN endpoint.'
+    fi
+
+    workdir="$(mktemp -d /run/ocserv-vps-camouflage.XXXXXX)"
+    archive="${workdir}/site.download"
+    for address in "${download_addresses[@]}"; do
+      if http_code="$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+          --retry 2 --connect-timeout 15 --max-time 180 --max-filesize 10485760 \
+          --resolve "${CAMOUFLAGE_DOWNLOAD_HOST}:${CAMOUFLAGE_DOWNLOAD_PORT}:${address}" \
+          --output "${archive}" --write-out '%{http_code}' "${CAMOUFLAGE_DOWNLOAD_URL}")"; then
+        [[ "${http_code}" == 200 ]] || \
+          die 'Camouflage download URL must return HTTP 200 directly; redirects are not followed.'
+        downloaded=1
+        break
+      fi
+    done
+    [[ "${downloaded}" == 1 && -s "${archive}" ]] || die 'Could not download the Camouflage site.'
+    [[ "$(stat -c '%s' "${archive}")" -le 10485760 ]] || \
+      die 'Downloaded Camouflage site exceeds the 10 MiB limit.'
+    python3 "${OCSERV_CAMOUFLAGE_EXTRACTOR}" "${archive}" "${stage}"
+    source_label='custom-download'
+  else
+    [[ -z "${download_url}" ]] || die 'Camouflage download URL is valid only for the custom template.'
+    [[ -d "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}" && \
+       -f "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/index.html" ]] || \
+      die "Built-in Camouflage site is missing: ${template}"
+    cp -a "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/." "${stage}/"
+    source_label="template:${template}"
+  fi
+
+  [[ -f "${stage}/index.html" && ! -L "${stage}/index.html" ]] || \
+    die 'Camouflage site must contain a regular index.html at its root.'
+  if find "${stage}" -type l -print -quit | grep -q .; then
+    die 'Camouflage site must not contain symbolic links.'
+  fi
+  find "${stage}" -type d -exec chmod 0755 {} +
+  find "${stage}" -type f -exec chmod 0644 {} +
+  printf '%s\n' "${source_label}" > "${stage}/.ocserv-vps-source"
+  chmod 0600 "${stage}/.ocserv-vps-source"
+  chown -R root:root "${stage}"
+  rm -rf "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
+  mv "${stage}" "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
+  stage=''
+  info "Installed Camouflage website (${source_label})."
+)
+
+render_advanced_camouflage_nginx() {
+  local domain="$1" vpn_port="$2"
+  validate_domain "${domain}"
+  validate_port 'VPN port' "${vpn_port}"
+  [[ "${vpn_port}" == 443 ]] || die 'Advanced Camouflage requires public VPN port 443.'
+  [[ -f "${OCSERV_CAMOUFLAGE_SITE_ROOT}/index.html" && \
+     ! -L "${OCSERV_CAMOUFLAGE_SITE_ROOT}/index.html" ]] || \
+    die 'The local Camouflage website is unavailable.'
+  [[ -f "${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/fullchain.pem" && \
+     -f "${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/privkey.pem" ]] || \
+    die 'The managed certificate is unavailable for Advanced Camouflage.'
+  [[ -f "${OCSERV_NGINX_STREAM_MODULE_CONFIG}" ]] || \
+    die 'The nginx stream module is not enabled by the distribution package.'
+
+  install -d -m 0755 \
+    "$(dirname "${OCSERV_CAMOUFLAGE_NGINX_SITE}")" \
+    "$(dirname "${OCSERV_CAMOUFLAGE_NGINX_LINK}")" \
+    "$(dirname "${OCSERV_CAMOUFLAGE_NGINX_STREAM}")"
+  cat > "${OCSERV_CAMOUFLAGE_NGINX_SITE}" <<EOF
+server {
+    listen 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT} ssl http2 proxy_protocol;
+    server_name ${domain};
+
+    ssl_certificate ${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/fullchain.pem;
+    ssl_certificate_key ${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+
+    set_real_ip_from 127.0.0.1;
+    real_ip_header proxy_protocol;
+
+    location / {
+        root ${OCSERV_CAMOUFLAGE_SITE_ROOT};
+        index index.html;
+        try_files \$uri \$uri/ /index.html;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy same-origin always;
+    }
+
+    location ~ (^|/)\\. {
+        deny all;
+    }
+}
+EOF
+  chmod 0644 "${OCSERV_CAMOUFLAGE_NGINX_SITE}"
+  ln -sfn "${OCSERV_CAMOUFLAGE_NGINX_SITE}" "${OCSERV_CAMOUFLAGE_NGINX_LINK}"
+
+  cat > "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" <<EOF
+# Browsers advertising HTTP/2 receive the cover site. AnyConnect/OpenConnect
+# and HTTP/1.1 probes retain end-to-end TLS and are passed to ocserv.
+stream {
+    map \$ssl_preread_server_name \$ocserv_vps_known_sni {
+        ${domain} 1;
+        default 0;
+    }
+
+    map "\$ocserv_vps_known_sni:\$ssl_preread_alpn_protocols" \$ocserv_vps_backend {
+        ~^1:.*\\bh2\\b 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};
+        ~^1: 127.0.0.1:${OCSERV_CAMOUFLAGE_TCP_PORT};
+        default 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};
+    }
+
+    server {
+        listen ${vpn_port};
+        proxy_pass \$ocserv_vps_backend;
+        proxy_protocol on;
+        proxy_connect_timeout 10s;
+        proxy_timeout 1h;
+        ssl_preread on;
+    }
+}
+EOF
+  chmod 0644 "${OCSERV_CAMOUFLAGE_NGINX_STREAM}"
+}
+
+verify_advanced_camouflage_site() {
+  local domain="$1" server_ip http_version
+  validate_domain "${domain}"
+  server_ip="$(ip -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')"
+  [[ -n "${server_ip}" ]] || die 'Cannot determine the VPS IPv4 address for the Camouflage site probe.'
+  http_version="$(curl --noproxy '*' --http2 --fail --silent --show-error --max-time 30 \
+    --output /dev/null --write-out '%{http_version}' \
+    --resolve "${domain}:443:${server_ip}" "https://${domain}/")"
+  [[ "${http_version}" == 2 ]] || die 'Advanced Camouflage cover site did not negotiate HTTP/2.'
+  info "Advanced Camouflage HTTP/2 cover-site probe passed for https://${domain}/."
 }
 
 create_password_user() {
@@ -1177,8 +1464,14 @@ EOF
 )
 
 render_network_assets() {
-  local vpn_network="$1" vpn_port="$2" ssh_port="$3" public_interface="$4"
+  local vpn_network="$1" vpn_port="$2" ssh_port="$3" public_interface="$4" udp_enabled="${5:-1}"
+  local udp_rule='iptables -w -A OCSERV_VPS_INPUT -p udp --dport "${VPN_PORT}" -j ACCEPT'
   validate_interface "${public_interface}"
+  case "${udp_enabled}" in
+    0 | false) udp_rule='' ;;
+    1 | true) ;;
+    *) die 'UDP firewall mode must be enabled or disabled.' ;;
+  esac
   install -d -m 0750 "${OCSERV_BIN_DIR}"
   cat > "${OCSERV_NETWORK_SCRIPT}" <<EOF
 #!/usr/bin/env bash
@@ -1194,7 +1487,7 @@ iptables -w -A OCSERV_VPS_INPUT -i lo -j ACCEPT
 iptables -w -A OCSERV_VPS_INPUT -p tcp --dport "\${SSH_PORT}" -j ACCEPT
 iptables -w -A OCSERV_VPS_INPUT -p tcp --dport 80 -j ACCEPT
 iptables -w -A OCSERV_VPS_INPUT -p tcp --dport "\${VPN_PORT}" -j ACCEPT
-iptables -w -A OCSERV_VPS_INPUT -p udp --dport "\${VPN_PORT}" -j ACCEPT
+${udp_rule}
 iptables -w -A OCSERV_VPS_INPUT -p icmp -j ACCEPT
 iptables -w -A OCSERV_VPS_INPUT -j DROP
 iptables -w -C INPUT -j OCSERV_VPS_INPUT 2>/dev/null || iptables -w -I INPUT 1 -j OCSERV_VPS_INPUT

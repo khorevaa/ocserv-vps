@@ -524,6 +524,60 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("connectionServerURL", control)
         self.assertIn("camouflageSecretPattern", control)
 
+    def test_advanced_camouflage_is_tcp_only_and_keeps_ocserv_tls_end_to_end(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        manager = (repository / "ocserv-vps.sh").read_text(encoding="utf-8")
+        bootstrap = (repository / "scripts" / "bootstrap-vps.sh").read_text(
+            encoding="utf-8"
+        )
+        common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        status = (repository / "scripts" / "status.sh").read_text(encoding="utf-8")
+        uninstaller = (repository / "scripts" / "uninstall.sh").read_text(
+            encoding="utf-8"
+        )
+
+        for contract in (
+            "OCSERV_ADVANCED_CAMOUFLAGE",
+            "OCSERV_CAMOUFLAGE_SITE_TEMPLATE",
+            "OCSERV_CAMOUFLAGE_SITE_URL",
+        ):
+            self.assertIn(contract, manager)
+        for contract in ("--advanced-camouflage", "--camouflage-site-template"):
+            self.assertIn(contract, manager)
+            self.assertIn(contract, bootstrap)
+        self.assertIn("--camouflage-site-url", bootstrap)
+        self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL", manager)
+        self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL", bootstrap)
+        self.assertIn("Advanced Camouflage requires public VPN port 443", bootstrap)
+        self.assertIn("libnginx-mod-stream", bootstrap)
+        self.assertIn('render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 0', bootstrap)
+        self.assertIn("install_camouflage_site", bootstrap)
+        self.assertIn("render_advanced_camouflage_nginx", bootstrap)
+        self.assertIn("verify_advanced_camouflage_site", bootstrap)
+        self.assertIn("cover site did not negotiate HTTP/2", common)
+
+        rendered = common.split("render_ocserv_config() {", 1)[1].split(
+            "create_password_user() {", 1
+        )[0]
+        self.assertIn("tcp_port=\"${OCSERV_CAMOUFLAGE_TCP_PORT}\"", rendered)
+        self.assertIn("listen_host='127.0.0.1'", rendered)
+        self.assertIn("no-udp = true", rendered)
+        self.assertIn("listen-proxy-proto = true", rendered)
+        nginx = common.split("render_advanced_camouflage_nginx() {", 1)[1].split(
+            "verify_advanced_camouflage_site() {", 1
+        )[0]
+        self.assertIn("ssl_preread on", nginx)
+        self.assertIn("proxy_protocol on", nginx)
+        self.assertIn("ssl http2 proxy_protocol", nginx)
+        self.assertIn("root ${OCSERV_CAMOUFLAGE_SITE_ROOT}", nginx)
+        self.assertIn("try_files \\$uri \\$uri/ /index.html", nginx)
+        self.assertIn("$ssl_preread_alpn_protocols", nginx)
+        self.assertNotIn("proxy_ssl_", nginx)
+        self.assertNotIn("CAMOUFLAGE_DOWNLOAD_URL", nginx)
+        self.assertNotIn("proxy_pass https://127.0.0.1", nginx)
+        self.assertIn("UDP/DTLS: disabled", status)
+        self.assertIn('"${OCSERV_CAMOUFLAGE_NGINX_STREAM}"', uninstaller)
+
     def test_bootstrap_prints_generated_initial_vpn_credentials(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         bootstrap = (repository / "scripts" / "bootstrap-vps.sh").read_text(
