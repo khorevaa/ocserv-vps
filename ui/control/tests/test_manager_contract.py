@@ -29,6 +29,7 @@ class ManagerContractTests(unittest.TestCase):
             "install)",
             "status)",
             "add-user)",
+            "vpn-access)",
             "update)",
             "rollback)",
             "install-ui)",
@@ -46,6 +47,9 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn("OCSERV_APPROVE_UNINSTALL", self.manager)
         self.assertIn("runtime_task bootstrap-vps.sh", self.manager)
         self.assertIn("runtime_task install-ui.sh", self.manager)
+        self.assertIn("show_initial_vpn_credentials", self.manager)
+        self.assertIn("VPN username: %s", self.manager)
+        self.assertIn("VPN password: %s", self.manager)
 
     def test_all_images_point_to_product_repository(self) -> None:
         product_source = "https://github.com/khorevaa/ocserv-vps"

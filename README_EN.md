@@ -10,7 +10,7 @@ A ready-to-run [ocserv](https://www.infradead.org/ocserv/) VPN server for your o
 
 - installs ocserv, Docker, and required system packages on a fresh Debian or Ubuntu server;
 - obtains and renews a Let's Encrypt TLS certificate;
-- creates VPN users with secure one-time passwords;
+- creates VPN users with secure one-time passwords and prints the initial VPN credentials after installation;
 - displays server health, active connections, and the event journal;
 - bounds the VPN journal: after 4 MiB it retains the newest 10,000 events;
 - updates and rolls back the server image without manual configuration edits;
@@ -57,7 +57,7 @@ sudo ocserv-vps install
 Pass a tag to install a specific manager release:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.1
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.2
 ```
 
 ## Management

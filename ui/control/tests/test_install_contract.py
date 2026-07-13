@@ -280,6 +280,16 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("/root/ocserv-vps-initial-credentials", uninstaller)
         self.assertIn("/root/ocserv-vps-user-*", uninstaller)
 
+    def test_bootstrap_prints_generated_initial_vpn_credentials(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        bootstrap = (repository / "scripts" / "bootstrap-vps.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Sensitive initial VPN credentials follow", bootstrap)
+        self.assertIn("VPN username: %s", bootstrap)
+        self.assertIn("VPN password: %s", bootstrap)
+        self.assertIn('"${GENERATED_VPN_PASSWORD}"', bootstrap)
+
     def test_controller_tunnel_helpers_use_exact_installed_url(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         shell_helper = (repository / "helpers" / "ui-tunnel.sh").read_text(

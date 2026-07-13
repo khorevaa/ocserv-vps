@@ -99,6 +99,29 @@ state_value() {
   awk -F= -v wanted="${key}" '$1 == wanted {print substr($0, index($0, "=") + 1)}' "${state_file}" | tail -n 1
 }
 
+show_initial_vpn_credentials() {
+  require_root
+  local credentials_file='/root/ocserv-vps-initial-credentials'
+  local username password key count
+  [[ -f "${credentials_file}" && ! -L "${credentials_file}" ]] || \
+    die "initial VPN credentials are unavailable: ${credentials_file}"
+  [[ "$(stat -c '%u:%g %a' "${credentials_file}")" == '0:0 600' ]] || \
+    die "initial VPN credentials have unsafe ownership or permissions: ${credentials_file}"
+  for key in username password; do
+    count="$(awk -F= -v wanted="${key}" '$1 == wanted {count++} END {print count+0}' "${credentials_file}")"
+    [[ "${count}" == 1 ]] || die "invalid ${key} entry in ${credentials_file}"
+  done
+  username="$(awk -F= '$1 == "username" {print substr($0, index($0, "=") + 1)}' "${credentials_file}")"
+  password="$(awk -F= '$1 == "password" {print substr($0, index($0, "=") + 1)}' "${credentials_file}")"
+  [[ "${username}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$ ]] || die 'stored VPN username is invalid'
+  [[ "${password}" =~ ^[0-9a-f]{32}$ ]] || die 'stored VPN password is invalid'
+  printf '\n%s\n' 'Sensitive initial VPN credentials follow. Store them securely.'
+  printf 'VPN username: %s\n' "${username}"
+  printf 'VPN password: %s\n' "${password}"
+  printf 'Root-only backup: %s\n' "${credentials_file}"
+  unset password
+}
+
 install_stack() {
   require_root
   [[ ! -e "${state_file}" ]] || die 'a managed stack already exists; use update commands'
@@ -140,6 +163,7 @@ install_stack() {
       --ui-port "${OCSERV_UI_PORT:-8765}" --ssh-port "${ssh_port}" --approve-restart
   fi
   echo -e "${green}ocserv-vps installation finished.${plain}"
+  show_initial_vpn_credentials
   [[ ! -x /usr/local/sbin/ocserv-ui-access-info ]] || /usr/local/sbin/ocserv-ui-access-info
 }
 
@@ -263,6 +287,7 @@ show_menu() {
   echo -e "${blue} 12.${plain} Follow VPN logs"
   echo -e "${blue} 13.${plain} Update manager"
   echo -e "${blue} 14.${plain} Uninstall"
+  echo -e "${blue} 15.${plain} Show initial VPN credentials"
   echo -e "${blue}  0.${plain} Exit"
   read -r -p 'Select an option: ' choice
   case "${choice}" in
@@ -280,6 +305,7 @@ show_menu() {
     12) docker logs --tail 200 --follow ocserv-vps ;;
     13) update_manager ;;
     14) uninstall_stack ;;
+    15) show_initial_vpn_credentials ;;
     0) exit 0 ;;
     *) die 'invalid menu option' ;;
   esac
@@ -294,6 +320,7 @@ Commands:
   status                  Show VPN, certificate, networking, and backup state
   ui-status               Show private UI state
   add-user [username]     Add a user or rotate that user's generated password
+  vpn-access              Print the initial VPN username and generated password
   update                  Deploy a verified ocserv image version
   rollback                Roll back to a retained version or "previous"
   install-ui              Install the private Unix-socket UI
@@ -321,6 +348,7 @@ case "${command_name}" in
   status) require_root; runtime_task status.sh "$@" ;;
   ui-status) require_root; runtime_task ui-status.sh "$@" ;;
   add-user) add_user "$@" ;;
+  vpn-access) show_initial_vpn_credentials ;;
   update) update_vpn "$@" ;;
   rollback) rollback_vpn "$@" ;;
   install-ui) install_ui "$@" ;;
