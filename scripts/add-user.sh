@@ -25,6 +25,7 @@ docker image inspect "${CURRENT_IMAGE}" >/dev/null 2>&1 || die "Current image is
 
 acquire_stack_locks
 
+SERVER_URL="$(ocserv_connection_url "$(state_get domain)" "$(state_get vpn_port)")"
 create_password_user "${CURRENT_IMAGE}" "${USERNAME}"
 CREDENTIAL_FILE="/root/ocserv-vps-user-${USERNAME}"
 # Create the file 0600 before writing so the password is never briefly readable
@@ -33,6 +34,7 @@ install -m 0600 /dev/null "${CREDENTIAL_FILE}"
 cat > "${CREDENTIAL_FILE}" <<EOF
 username=${USERNAME}
 password=${GENERATED_VPN_PASSWORD}
+server=${SERVER_URL}
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 if [[ -f /root/ocserv-vps-initial-credentials ]]; then

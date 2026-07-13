@@ -164,7 +164,7 @@ state_value() {
 show_initial_vpn_credentials() {
   require_root
   local credentials_file='/root/ocserv-vps-initial-credentials'
-  local username password key count
+  local username password server key count server_count
   [[ -f "${credentials_file}" && ! -L "${credentials_file}" ]] || \
     die "initial VPN credentials are unavailable: ${credentials_file}"
   [[ "$(stat -c '%u:%g %a' "${credentials_file}")" == '0:0 600' ]] || \
@@ -175,9 +175,15 @@ show_initial_vpn_credentials() {
   done
   username="$(awk -F= '$1 == "username" {print substr($0, index($0, "=") + 1)}' "${credentials_file}")"
   password="$(awk -F= '$1 == "password" {print substr($0, index($0, "=") + 1)}' "${credentials_file}")"
+  server_count="$(awk -F= '$1 == "server" {count++} END {print count+0}' "${credentials_file}")"
+  [[ "${server_count}" == 0 || "${server_count}" == 1 ]] || die "invalid server entry in ${credentials_file}"
+  server="$(awk -F= '$1 == "server" {print substr($0, index($0, "=") + 1)}' "${credentials_file}")"
   [[ "${username}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$ ]] || die 'stored VPN username is invalid'
   [[ "${password}" =~ ^[0-9a-f]{32}$ ]] || die 'stored VPN password is invalid'
+  [[ -z "${server}" || "${server}" =~ ^https://[A-Za-z0-9.-]+:[0-9]+/([?][A-Za-z0-9._~-]{16,128})?$ ]] || \
+    die 'stored VPN server URL is invalid'
   printf '\n%s\n' 'Sensitive initial VPN credentials follow. Store them securely.'
+  [[ -z "${server}" ]] || printf 'VPN server: %s\n' "${server}"
   printf 'VPN username: %s\n' "${username}"
   printf 'VPN password: %s\n' "${password}"
   printf 'Root-only backup: %s\n' "${credentials_file}"
@@ -189,7 +195,7 @@ install_stack() {
   [[ ! -e "${state_file}" ]] || die 'a managed stack already exists; use update commands'
 
   local domain email username version image vpn_network vpn_port dns_primary dns_secondary
-  local public_interface ssh_port ui_version prepare_nginx=0 install_ui=0
+  local public_interface ssh_port ui_version camouflage_secret='' camouflage_realm='' prepare_nginx=0 install_ui=0 camouflage=0
   prompt_value domain 'VPN domain' '' OCSERV_DOMAIN
   prompt_value email 'ACME email' '' OCSERV_ACME_EMAIL
   prompt_value username 'Initial VPN username' 'vpnuser' OCSERV_VPN_USERNAME
@@ -201,6 +207,12 @@ install_stack() {
   prompt_value dns_secondary 'Secondary DNS' '1.0.0.1' OCSERV_DNS_SECONDARY
   prompt_optional public_interface 'Public interface (empty for auto-detect)' '' OCSERV_PUBLIC_INTERFACE
   prompt_value ssh_port 'SSH port to preserve in the firewall' '22' OCSERV_SSH_PORT
+  if prompt_yes_no 'Enable ocserv Camouflage?' 0 OCSERV_CAMOUFLAGE; then
+    camouflage=1
+    prompt_optional camouflage_secret 'Camouflage secret (empty to generate securely)' '' OCSERV_CAMOUFLAGE_SECRET
+    prompt_value camouflage_realm 'Camouflage realm' 'Test Environment' OCSERV_CAMOUFLAGE_REALM
+  fi
+  unset OCSERV_CAMOUFLAGE_SECRET OCSERV_CAMOUFLAGE_REALM
   prompt_yes_no 'Prepare nginx ACME webroot instead of standalone ACME?' 0 OCSERV_PREPARE_NGINX && prepare_nginx=1
   prompt_yes_no 'Install the private management UI?' 1 OCSERV_INSTALL_UI && install_ui=1
   require_approval 'firewall replacement' OCSERV_APPROVE_FIREWALL
@@ -214,8 +226,13 @@ install_stack() {
     --ssh-port "${ssh_port}" --approve-firewall --approve-restart
   )
   [[ -z "${public_interface}" ]] || args+=(--public-interface "${public_interface}")
+  [[ ${camouflage} -eq 0 ]] || args+=(--camouflage)
   [[ ${prepare_nginx} -eq 0 ]] || args+=(--prepare-nginx)
+  OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET="${camouflage_secret}"
+  OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM="${camouflage_realm}"
+  export OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM
   runtime_task bootstrap-vps.sh "${args[@]}"
+  unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM
 
   if [[ ${install_ui} -eq 1 ]]; then
     prompt_image_version ui_version 'UI version' OCSERV_UI_VERSION \
@@ -420,6 +437,9 @@ Commands:
 Without a command, an interactive menu is shown. For unattended installation,
 set OCSERV_VPS_NONINTERACTIVE=1 plus OCSERV_DOMAIN, OCSERV_ACME_EMAIL,
 OCSERV_APPROVE_FIREWALL=1, and OCSERV_APPROVE_RESTART=1.
+Set OCSERV_CAMOUFLAGE=1 to enable Camouflage; OCSERV_CAMOUFLAGE_SECRET is
+optional and defaults to a securely generated secret.
+OCSERV_CAMOUFLAGE_REALM defaults to "Test Environment".
 Image version prompts default to the latest published immutable GHCR tag; set
 OCSERV_VERSION or OCSERV_UI_VERSION to pin a specific version.
 EOF

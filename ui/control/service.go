@@ -35,11 +35,12 @@ const (
 )
 
 var (
-	usernamePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$`)
-	versionPattern   = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$`)
-	imagePattern     = regexp.MustCompile(`^ghcr\.io/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
-	domainPattern    = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
-	timestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`)
+	usernamePattern         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$`)
+	versionPattern          = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$`)
+	imagePattern            = regexp.MustCompile(`^ghcr\.io/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
+	domainPattern           = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
+	timestampPattern        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`)
+	camouflageSecretPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{16,128}$`)
 )
 
 type controlService struct {
@@ -666,16 +667,69 @@ func (s *controlService) connectionProfile(username, password string) (map[strin
 	if !domainOK || !portOK {
 		return nil, controlFailure(500, "invalid_state", "The managed VPN endpoint is unavailable.")
 	}
-	server := fmt.Sprintf("https://%s:%d/", domain, port)
+	server, err := s.connectionServerURL(domain, port)
+	if err != nil {
+		return nil, err
+	}
 	profileText := fmt.Sprintf(
 		"# ocserv-vps connection profile\nserver=%s\nprotocol=anyconnect\nusername=%s\npassword=%s\n",
 		server, username, password,
 	)
-	cliCommand := fmt.Sprintf("openconnect --protocol=anyconnect --user=%s %s", username, server)
+	cliServer := server
+	if strings.ContainsRune(server, '?') {
+		cliServer = "'" + server + "'"
+	}
+	cliCommand := fmt.Sprintf("openconnect --protocol=anyconnect --user=%s %s", username, cliServer)
 	return map[string]any{
 		"server": server, "host": domain, "port": port, "protocol": "anyconnect",
 		"username": username, "password": password, "cli": cliCommand, "text": profileText,
 	}, nil
+}
+
+func (s *controlService) connectionServerURL(domain string, port int) (string, error) {
+	base := fmt.Sprintf("https://%s:%d/", domain, port)
+	content, missing, err := readRegularFile(s.config.ConfigPath, maxConfigurationBytes)
+	if missing || err != nil || !validConfigurationContent(string(content)) {
+		return "", controlFailure(503, "configuration_unavailable", "The managed ocserv configuration is unavailable.")
+	}
+	enabled := false
+	secret := ""
+	for _, rawLine := range strings.Split(string(content), "\n") {
+		line := strings.TrimSpace(strings.SplitN(rawLine, "#", 2)[0])
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+			unquoted, unquoteErr := strconv.Unquote(value)
+			if unquoteErr != nil {
+				return "", controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+			}
+			value = unquoted
+		}
+		switch key {
+		case "camouflage":
+			switch strings.ToLower(value) {
+			case "true":
+				enabled = true
+			case "false":
+				enabled = false
+			default:
+				return "", controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+			}
+		case "camouflage_secret":
+			secret = value
+		}
+	}
+	if !enabled {
+		return base, nil
+	}
+	if !camouflageSecretPattern.MatchString(secret) {
+		return "", controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+	}
+	return base + "?" + secret, nil
 }
 
 func (s *controlService) runOCCTL(arguments ...string) (string, error) {

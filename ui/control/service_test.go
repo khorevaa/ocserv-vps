@@ -342,6 +342,28 @@ func TestAddUserReturnsOneTimePasswordAndConflicts(t *testing.T) {
 	assertControlError(t, err, 409, "user_exists")
 }
 
+func TestConnectionProfileUsesCamouflageURL(t *testing.T) {
+	service, _, cfg := testService(t)
+	secret := "camouflage-secret-2026"
+	configuration := "auth = \"plain[passwd=/etc/ocserv/ocpasswd]\"\ncamouflage = true\ncamouflage_secret = \"" + secret + "\"\n"
+	if err := os.WriteFile(cfg.ConfigPath, []byte(configuration), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := service.connectionProfile("alice", "TemporaryPassword")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := "https://vpn.example.com:443/?" + secret
+	if connection["server"] != server || connection["cli"] != "openconnect --protocol=anyconnect --user=alice '"+server+"'" || !strings.Contains(connection["text"].(string), "server="+server) {
+		t.Fatalf("unexpected Camouflage connection profile: %#v", connection)
+	}
+	if err := os.WriteFile(cfg.ConfigPath, []byte("camouflage = true\ncamouflage_secret = short\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.connectionProfile("alice", "TemporaryPassword")
+	assertControlError(t, err, 500, "invalid_configuration")
+}
+
 func TestDeleteUserRemovesPasswordRecordAndTerminatesSessions(t *testing.T) {
 	service, runner, cfg := testService(t)
 	result, err := service.deleteUser("alice")

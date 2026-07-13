@@ -10,6 +10,7 @@ A ready-to-run [ocserv](https://www.infradead.org/ocserv/) VPN server for your o
 
 - installs ocserv, Docker, and required system packages on a fresh Debian or Ubuntu server;
 - obtains and renews a Let's Encrypt TLS certificate;
+- optionally enables Camouflage so unauthorized requests resemble an ordinary web server;
 - creates VPN users with secure one-time passwords and prints the initial VPN credentials after installation;
 - displays server health, active connections, and the event journal;
 - bounds the VPN journal: after 4 MiB it retains the newest 10,000 events;
@@ -52,6 +53,19 @@ When `OCSERV_DOMAIN` is not set and stdin is non-interactive, only the manager i
 
 ```bash
 sudo ocserv-vps install
+```
+
+### Camouflage
+
+Camouflage can be enabled during interactive installation. The installer asks for the HTTP realm (default `Test Environment`) shown by ocserv to unauthorized requests, while VPN clients use a URL such as `https://vpn.example.com:443/?secret`. The URL is shown only with the sensitive VPN credentials and the secret remains in the protected server configuration.
+
+For unattended installation, set `OCSERV_CAMOUFLAGE=1`. `OCSERV_CAMOUFLAGE_SECRET` is optional; when omitted, the installer generates a random 32-character secret. `OCSERV_CAMOUFLAGE_REALM` defaults to `Test Environment`. Explicit secrets must contain 16–128 URL-safe letters, digits, `.`, `_`, `~`, or `-`.
+
+```bash
+OCSERV_CAMOUFLAGE=1 \
+OCSERV_CAMOUFLAGE_SECRET=replace-with-a-long-secret \
+OCSERV_CAMOUFLAGE_REALM='Test Environment' \
+sudo -E ocserv-vps install
 ```
 
 Pass a tag to install a specific manager release:

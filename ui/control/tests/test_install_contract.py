@@ -487,6 +487,43 @@ class InstallComposeContractTests(unittest.TestCase):
             deployer.index('test_image_config "${NEW_IMAGE}"'),
         )
 
+    def test_installation_can_enable_camouflage_without_leaking_it_to_public_state(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        manager = (repository / "ocserv-vps.sh").read_text(encoding="utf-8")
+        bootstrap = (repository / "scripts" / "bootstrap-vps.sh").read_text(
+            encoding="utf-8"
+        )
+        common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        control = (repository / "ui" / "control" / "service.go").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Enable ocserv Camouflage?", manager)
+        self.assertIn("OCSERV_CAMOUFLAGE_SECRET", manager)
+        self.assertIn("'Camouflage realm' 'Test Environment'", manager)
+        self.assertNotIn("--camouflage-secret", bootstrap)
+        self.assertNotIn("--camouflage-realm", bootstrap)
+        self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET", bootstrap)
+        self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM", bootstrap)
+        self.assertIn('CAMOUFLAGE_REALM="${CAMOUFLAGE_REALM:-Test Environment}"', bootstrap)
+        self.assertIn('CAMOUFLAGE_SECRET="$(openssl rand -hex 16)"', bootstrap)
+        self.assertIn('server=${VPN_SERVER_URL}', bootstrap)
+        self.assertIn("validate_camouflage_secret()", common)
+        self.assertIn("validate_camouflage_realm()", common)
+        self.assertIn('camouflage_config="camouflage = true', common)
+        self.assertIn('camouflage_secret = \\"${camouflage_secret}\\"', common)
+        self.assertIn('camouflage_realm = \\"${camouflage_realm}\\"', common)
+        self.assertIn('server_url="$(ocserv_connection_url', common)
+        self.assertIn("client_config_file=", common)
+        self.assertIn("printf 'server=%s\\n'", common)
+        self.assertIn('chmod 0600 "${client_config_file}"', common)
+        self.assertIn('--config="${client_config_file}"', common)
+        self.assertNotIn('"${server_url}" < "${password_file}"', common)
+        state_writer = common.split("write_state() {", 1)[1].split("write_stack_env() {", 1)[0]
+        self.assertNotIn("camouflage", state_writer)
+        self.assertIn("connectionServerURL", control)
+        self.assertIn("camouflageSecretPattern", control)
+
     def test_bootstrap_prints_generated_initial_vpn_credentials(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         bootstrap = (repository / "scripts" / "bootstrap-vps.sh").read_text(
@@ -495,6 +532,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("Sensitive initial VPN credentials follow", bootstrap)
         self.assertIn("VPN username: %s", bootstrap)
         self.assertIn("VPN password: %s", bootstrap)
+        self.assertIn("VPN server: %s", bootstrap)
         self.assertIn('"${GENERATED_VPN_PASSWORD}"', bootstrap)
 
     def test_warning_panels_use_theme_aware_high_contrast_colors(self) -> None:
