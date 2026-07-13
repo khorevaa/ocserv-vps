@@ -85,4 +85,4 @@ jobs:
             printf '| Multi-stage candidate | %.1f MiB |\n' "$(awk -v bytes="${candidate_size}" 'BEGIN {print bytes / 1024 / 1024}')"
             echo
             echo "Reduction: ${reduction_percent}%"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
