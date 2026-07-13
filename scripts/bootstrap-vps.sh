@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Guard: this task script is sourced by the ocserv-vps entrypoint after
+# common.sh. Running it directly leaves die()/set -euo pipefail undefined,
+# which silently bypasses approval and safety gates. Refuse that.
+if [[ "$(type -t die)" != function ]]; then
+  printf '%s\n' 'Run this through the ocserv-vps entrypoint, not directly.' >&2
+  exit 1
+fi
+
 usage() {
   cat <<'EOF'
 Usage: remote-bootstrap-vps.sh --domain <fqdn> --acme-email <email>
@@ -143,12 +151,14 @@ render_ocserv_config "${DOMAIN}" "${VPN_NETWORK}" "${VPN_PORT}" "${DNS_PRIMARY}"
 render_compose_file
 write_stack_env "${IMAGE}"
 create_password_user "${IMAGE}" "${VPN_USERNAME}"
+# Create the file 0600 before writing so the password is never briefly readable
+# under a group-permissive umask.
+install -m 0600 /dev/null /root/ocserv-vps-initial-credentials
 cat > /root/ocserv-vps-initial-credentials <<EOF
 username=${VPN_USERNAME}
 password=${GENERATED_VPN_PASSWORD}
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
-chmod 0600 /root/ocserv-vps-initial-credentials
 
 render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}"
 

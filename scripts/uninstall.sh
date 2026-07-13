@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Guard: this task script is sourced by the ocserv-vps entrypoint after
+# common.sh. Running it directly leaves die()/set -euo pipefail undefined,
+# which silently bypasses approval and safety gates. Refuse that.
+if [[ "$(type -t die)" != function ]]; then
+  printf '%s\n' 'Run this through the ocserv-vps entrypoint, not directly.' >&2
+  exit 1
+fi
+
 APPROVE_UNINSTALL=0
 PURGE_DATA=0
 while [[ $# -gt 0 ]]; do

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"time"
 )
@@ -52,7 +53,8 @@ func (c controlClient) request(action string, payload map[string]any) (json.RawM
 	if _, err = connection.Write(append(encoded, '\n')); err != nil {
 		return nil, &controlError{503, "control_unavailable", "control service is unavailable"}
 	}
-	reader := bufio.NewReaderSize(connection, 1024*1024+1)
+	// LimitReader caps accumulation inside ReadBytes; the bufio size hint alone does not.
+	reader := bufio.NewReader(io.LimitReader(connection, 1024*1024+1))
 	line, err := reader.ReadBytes('\n')
 	if err != nil || len(line) > 1024*1024 || len(line) == 0 {
 		return nil, &controlError{503, "control_unavailable", "control service is unavailable"}

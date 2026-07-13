@@ -491,7 +491,9 @@ class InstallComposeContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("ocserv_validate_ssh_target", ssh_library)
-        self.assertIn('"${ssh_args[@]}" -- "${host}"', ssh_library)
+        # The tunnel helper performs the ssh invocation and must terminate option
+        # parsing with `--` before the untrusted host argument.
+        self.assertIn('-- "${HOST}"', shell_helper)
 
     @unittest.skipUnless(os.name == "posix", "strict file modes require POSIX")
     def test_cli_probe_strictly_converts_secure_cookies_to_root_only_header(self) -> None:

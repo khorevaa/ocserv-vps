@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Guard: this task script is sourced by the ocserv-vps entrypoint after
+# common.sh. Running it directly leaves die()/set -euo pipefail undefined,
+# which silently bypasses approval and safety gates. Refuse that.
+if [[ "$(type -t die)" != function ]]; then
+  printf '%s\n' 'Run this through the ocserv-vps entrypoint, not directly.' >&2
+  exit 1
+fi
+
 TO_VERSION=""
 HEALTH_TIMEOUT="45"
 APPROVE_RESTART="0"
@@ -29,6 +37,8 @@ OLD_IMAGE="$(state_get current_image)"
 DOMAIN="$(state_get domain)"
 VPN_NETWORK="$(state_get vpn_network)"
 VPN_PORT="$(state_get vpn_port)"
+[[ -n "${OLD_IMAGE}" && -n "${DOMAIN}" && -n "${VPN_NETWORK}" && -n "${VPN_PORT}" ]] || \
+  die 'Managed state is incomplete.'
 
 if [[ "${TO_VERSION}" == "previous" ]]; then
   TARGET_VERSION="$(state_get previous_version)"

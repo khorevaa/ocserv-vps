@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,16 +135,21 @@ func run() error {
 	server := &http.Server{Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 45 * time.Second, WriteTimeout: 45 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 * 1024}
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() { <-interrupt; _ = listener.Close(); close(done) }()
+	shutdownDone := make(chan struct{})
+	go func() {
+		<-interrupt
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if shutdownErr := server.Shutdown(ctx); shutdownErr != nil {
+			log.Printf("graceful shutdown failed: %v", shutdownErr)
+		}
+		close(shutdownDone)
+	}()
 	err = server.Serve(listener)
-	if err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+	if !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
-	select {
-	case <-done:
-	default:
-	}
+	<-shutdownDone
 	return nil
 }
 

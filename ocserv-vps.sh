@@ -155,7 +155,7 @@ install_stack() {
   runtime_task bootstrap-vps.sh "${args[@]}"
 
   if [[ ${install_ui} -eq 1 ]]; then
-    prompt_value ui_version 'UI version' '0.4.16' OCSERV_UI_VERSION
+    prompt_value ui_version 'UI version' '0.4.17' OCSERV_UI_VERSION
     runtime_task install-ui.sh \
       --ui-version "${ui_version}" \
       --ui-image "ghcr.io/khorevaa/ocserv-vps-ui-web:${ui_version}" \
@@ -196,7 +196,7 @@ rollback_vpn() {
 install_ui() {
   require_root
   local version ssh_port
-  prompt_value version 'UI version' '0.4.16' OCSERV_UI_VERSION
+  prompt_value version 'UI version' '0.4.17' OCSERV_UI_VERSION
   prompt_value ssh_port 'SSH port for tunnel instructions' '22' OCSERV_SSH_PORT
   require_approval 'VPN/UI restart during UI installation' OCSERV_APPROVE_RESTART
   runtime_task install-ui.sh \
@@ -260,13 +260,29 @@ uninstall_stack() {
 
 update_manager() {
   require_root
+  local repository='khorevaa/ocserv-vps'
   local version="${1:-}"
-  local installer
-  installer="$(mktemp)"
-  trap 'rm -f "${installer}"' RETURN
-  curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
-    --output "${installer}" 'https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh'
-  OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" ${version:+"${version}"}
+  local tag="${version}"
+  if [[ -z "${tag}" ]]; then
+    # Resolve the latest published release tag instead of tracking the mutable
+    # develop branch, so an update never runs code from an unreleased ref.
+    local response
+    response="$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+      --retry 3 --connect-timeout 15 --max-time 60 \
+      "https://api.github.com/repos/${repository}/releases/latest")"
+    tag="$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' <<<"${response}" | head -n 1)"
+  fi
+  [[ "${tag}" =~ ^v?[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]] || \
+    die "Could not resolve a valid release tag to update from: ${tag:-<empty>}"
+  # Subshell + EXIT trap so the downloaded installer is always removed, even when
+  # set -e aborts the pipeline (a function RETURN trap would be skipped).
+  (
+    installer="$(mktemp)"
+    trap 'rm -f "${installer}"' EXIT
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+      --output "${installer}" "https://raw.githubusercontent.com/${repository}/${tag}/install.sh"
+    OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" "${tag}"
+  )
 }
 
 show_menu() {
