@@ -66,7 +66,7 @@ jobs:
           SIGNING_KEY_URL: ${{ inputs.signing_key_url }}
           SIGNING_KEY_FINGERPRINT: ${{ inputs.signing_key_fingerprint }}
         run: |
-          docker/prepare-context.sh \
+          bash docker/prepare-context.sh \
             "${SOURCE_URL}" \
             "${SOURCE_SHA256}" \
             "${SIGNATURE_URL}" \

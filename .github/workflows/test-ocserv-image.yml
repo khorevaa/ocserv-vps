@@ -32,7 +32,7 @@ jobs:
 
       - name: Verify and prepare ocserv source
         run: |
-          docker/prepare-context.sh \
+          bash docker/prepare-context.sh \
             "${SOURCE_URL}" \
             "${SOURCE_SHA256}" \
             "${SIGNATURE_URL}" \
