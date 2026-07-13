@@ -71,7 +71,7 @@ ss -ltnup | grep -E ":(${VPN_PORT}|${OCSERV_TCP_PORT}|${OCSERV_CAMOUFLAGE_WEB_PO
 
 printf '\n%s\n' '=== Advanced Camouflage ==='
 if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]]; then
-  printf '%s\n' 'Mode: TCP-only nginx ALPN routing in camouflage-site container'
+  printf '%s\n' 'Mode: TCP-only nginx ALPN routing in ocserv-camouflage-site container'
   if [[ -f "${OCSERV_CAMOUFLAGE_SITE_METADATA}" && ! -L "${OCSERV_CAMOUFLAGE_SITE_METADATA}" ]]; then
     CAMOUFLAGE_SITE_SOURCE="$(head -n 1 "${OCSERV_CAMOUFLAGE_SITE_METADATA}")"
     case "${CAMOUFLAGE_SITE_SOURCE}" in

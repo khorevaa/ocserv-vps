@@ -1,6 +1,6 @@
 # Camouflage page prototypes
 
-This directory contains three standalone, dependency-free login-page decoys used by the `camouflage-site` nginx container:
+This directory contains three standalone, dependency-free login-page decoys used by the `ocserv-camouflage-site` nginx container:
 
 - `synology/` — Synology DSM / NAS-style sign-in;
 - `owncloud/` — ownCloud-style sign-in;
@@ -42,7 +42,7 @@ python3 -m http.server 8082 --directory camouflage/workspace
 
 Then open `http://127.0.0.1:<port>/`.
 
-The stock static server will answer characteristic stub paths with `404`; that is expected during visual-only preview. In an installed stack, those responses are served by the generated Nginx configuration in the `camouflage-site` sidecar.
+The stock static server will answer characteristic stub paths with `404`; that is expected during visual-only preview. In an installed stack, those responses are served by the generated Nginx configuration in the `ocserv-camouflage-site` sidecar.
 
 ## Tests
 

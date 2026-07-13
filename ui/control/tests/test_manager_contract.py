@@ -306,7 +306,7 @@ write_stack_env 'ghcr.io/khorevaa/ocserv-vps-server:test' \
   'nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 render_compose_file
 grep -q '^  camouflage-site:$' "${OCSERV_COMPOSE_FILE}"
-grep -q '^    container_name: camouflage-site$' "${OCSERV_COMPOSE_FILE}"
+grep -q '^    container_name: ocserv-camouflage-site$' "${OCSERV_COMPOSE_FILE}"
 grep -q './camouflage/site:/srv/camouflage:ro' "${OCSERV_COMPOSE_FILE}"
 printf '%s\n' 'advanced-nginx=alpn-site-or-tls-passthrough'
 

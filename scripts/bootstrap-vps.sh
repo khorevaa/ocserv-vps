@@ -307,8 +307,8 @@ set -euo pipefail
 if docker inspect ocserv-vps >/dev/null 2>&1; then
   docker kill --signal HUP ocserv-vps >/dev/null || docker restart ocserv-vps >/dev/null
 fi
-if docker inspect camouflage-site >/dev/null 2>&1; then
-  docker kill --signal HUP camouflage-site >/dev/null || docker restart camouflage-site >/dev/null
+if docker inspect ocserv-camouflage-site >/dev/null 2>&1; then
+  docker kill --signal HUP ocserv-camouflage-site >/dev/null || docker restart ocserv-camouflage-site >/dev/null
 fi
 EOF
 chmod 0750 "${OCSERV_CERT_DEPLOY_HOOK}"

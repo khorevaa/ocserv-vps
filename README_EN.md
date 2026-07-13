@@ -70,7 +70,7 @@ sudo -E ocserv-vps install
 
 #### Advanced website camouflage
 
-After native Camouflage is enabled, the installer can enable an advanced TCP-only mode and offer a cover-site choice. A separate `camouflage-site` Nginx container owns public TCP/443 through host networking: HTTP/2 browsers receive the selected website, while HTTP/1.1 OpenConnect/AnyConnect traffic is passed to the `ocserv-vps` container on `127.0.0.1:8443`. Nginx does not terminate the ocserv TLS connection, the client address is preserved with PROXY protocol, and ocserv still validates the URL secret.
+After native Camouflage is enabled, the installer can enable an advanced TCP-only mode and offer a cover-site choice. A separate `ocserv-camouflage-site` Nginx container owns public TCP/443 through host networking: HTTP/2 browsers receive the selected website, while HTTP/1.1 OpenConnect/AnyConnect traffic is passed to the `ocserv-vps` container on `127.0.0.1:8443`. Nginx does not terminate the ocserv TLS connection, the client address is preserved with PROXY protocol, and ocserv still validates the URL secret.
 
 Three built-in presets are available: `synology`, `owncloud`, and `workspace`. Their `camouflage.json` contracts generate exact local Nginx routes for entry pages, characteristic bootstrap requests, and fixed no-credential form responses. The fourth choice, `custom`, downloads a user-supplied cover site from `OCSERV_CAMOUFLAGE_SITE_URL`. The URL is used once during installation to download a file; it is not a reverse-proxy origin. ZIP, TAR/TAR.GZ, and standalone HTML downloads are supported and must produce a root `index.html`.
 
@@ -81,7 +81,7 @@ OCSERV_CAMOUFLAGE_SITE_TEMPLATE=synology \
 sudo -E ocserv-vps install
 ```
 
-The generated Nginx configuration and selected site are bind-mounted read-only into `camouflage-site` when Compose starts it. The official Nginx image is resolved to an immutable digest during installation and stored in the protected stack environment.
+The generated Nginx configuration and selected site are bind-mounted read-only into `ocserv-camouflage-site` when Compose starts it. The official Nginx image is resolved to an immutable digest during installation and stored in the protected stack environment.
 
 For the most advanced custom choice:
 

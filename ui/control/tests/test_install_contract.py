@@ -557,7 +557,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("cover site did not negotiate HTTP/2", common)
         self.assertIn("pull_camouflage_image", bootstrap)
         self.assertIn("test_camouflage_image_config", bootstrap)
-        self.assertIn("container_name: camouflage-site", common)
+        self.assertIn("container_name: ocserv-camouflage-site", common)
         self.assertIn("./camouflage/site:/srv/camouflage:ro", common)
         self.assertIn("./camouflage/nginx.conf:/etc/nginx/nginx.conf:ro", common)
         self.assertIn("network_mode: host", common)

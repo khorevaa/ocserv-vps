@@ -66,7 +66,7 @@ OCSERV_CAMOUFLAGE_SITE_METADATA="${OCSERV_CAMOUFLAGE_SITE_ROOT}/.ocserv-vps-sour
 OCSERV_CAMOUFLAGE_CONTRACT="${OCSERV_CAMOUFLAGE_ROOT}/camouflage.json"
 OCSERV_CAMOUFLAGE_NGINX_CONFIG="${OCSERV_CAMOUFLAGE_ROOT}/nginx.conf"
 OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT="/srv/camouflage"
-OCSERV_CAMOUFLAGE_CONTAINER="camouflage-site"
+OCSERV_CAMOUFLAGE_CONTAINER="ocserv-camouflage-site"
 OCSERV_CAMOUFLAGE_IMAGE_REFERENCE="docker.io/library/nginx:stable-alpine"
 OCSERV_CAMOUFLAGE_TCP_PORT="8443"
 OCSERV_CAMOUFLAGE_WEB_PORT="8444"
@@ -744,7 +744,7 @@ EOF
     cat >> "${OCSERV_COMPOSE_FILE}" <<'EOF'
   camouflage-site:
     image: "${OCSERV_CAMOUFLAGE_IMAGE:?OCSERV_CAMOUFLAGE_IMAGE is required}"
-    container_name: camouflage-site
+    container_name: ocserv-camouflage-site
     entrypoint: ["nginx"]
     command: ["-g", "daemon off;"]
     network_mode: host
