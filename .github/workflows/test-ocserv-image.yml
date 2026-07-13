@@ -6,6 +6,7 @@ on:
       - docker/Dockerfile
       - docker/entrypoint.sh
       - docker/prepare-context.sh
+      - ui/control/Dockerfile
       - .github/workflows/test-ocserv-image.yml
   workflow_dispatch:
 
@@ -24,6 +25,7 @@ jobs:
       SIGNING_KEY_FINGERPRINT: 1F42418905D8206AA754CCDC29EE58B996865171
       BASE_IMAGE: alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
       CANDIDATE_IMAGE: ocserv-vps-server:multistage-test
+      CONTROL_IMAGE: ocserv-vps-ui-control:server-compatibility-test
       PUBLISHED_IMAGE: ghcr.io/khorevaa/ocserv-vps-server:1.5.0
       REFERENCE_IMAGE: ocserv/ocserv@sha256:22661d3fa5153303e9956a90b7d6663807a32214d8c27caf5650067032096201
 
@@ -63,12 +65,29 @@ jobs:
             ! command -v meson
             ! command -v ninja
             test ! -e /usr/src/ocserv
-            ! ldd /usr/local/sbin/ocserv | grep -q "not found"
             test -x /usr/local/bin/occtl
             test -x /usr/local/bin/ocpasswd
+            for binary in \
+              /usr/local/sbin/ocserv \
+              /usr/local/sbin/ocserv-worker \
+              /usr/local/bin/occtl \
+              /usr/local/bin/ocpasswd; do
+              ! ldd "${binary}" | grep -q "not found"
+            done
             /usr/local/bin/occtl --help >/dev/null
             /usr/local/bin/ocpasswd --help >/dev/null
+            /sbin/tini --version >/dev/null
           '
+
+      - name: Verify UI control image compatibility
+        run: |
+          docker build \
+            --file ui/control/Dockerfile \
+            --build-arg "OCSERV_IMAGE=${CANDIDATE_IMAGE}" \
+            --build-arg "UI_VERSION=server-compatibility-test" \
+            --tag "${CONTROL_IMAGE}" \
+            ui/control
+          docker run --rm "${CONTROL_IMAGE}" --help
 
       - name: Compare image sizes
         run: |
@@ -82,16 +101,17 @@ jobs:
           reduction="$((published_size - candidate_size))"
           reduction_percent="$((reduction * 100 / published_size))"
           test "${reduction}" -gt 0
+          test "${candidate_compressed}" -lt "${reference_compressed}"
           {
             echo '## ocserv image size'
             echo
             echo '| Image | Uncompressed runtime | Compressed archive |'
             echo '| --- | ---: | ---: |'
-            printf '| Published single-stage | %.1f MiB | — |\n' "$(awk -v bytes="${published_size}" 'BEGIN {print bytes / 1024 / 1024}')"
+            printf '| Published single-stage | %.1f MiB | n/a |\n' "$(awk -v bytes="${published_size}" 'BEGIN {print bytes / 1024 / 1024}')"
             printf '| Alpine + scratch candidate | %.1f MiB | %.1f MiB |\n' \
               "$(awk -v bytes="${candidate_size}" 'BEGIN {print bytes / 1024 / 1024}')" \
               "$(awk -v bytes="${candidate_compressed}" 'BEGIN {print bytes / 1024 / 1024}')"
-            printf '| ocserv/ocserv reference | — | %.1f MiB |\n' \
+            printf '| ocserv/ocserv reference | n/a | %.1f MiB |\n' \
               "$(awk -v bytes="${reference_compressed}" 'BEGIN {print bytes / 1024 / 1024}')"
             echo
             echo "Reduction: ${reduction_percent}%"

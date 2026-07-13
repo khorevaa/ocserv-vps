@@ -75,7 +75,7 @@ RUN set -eux; \
       /runtime/tmp /runtime/usr/bin; \
     chmod 1777 /runtime/tmp; \
     cp /bin/busybox.static /runtime/bin/busybox; \
-    for applet in chmod date grep mkdir mv rmdir sh sleep tail wc; do \
+    for applet in awk chmod cp date dirname grep install mkdir mv rmdir sh sleep sort tail wc; do \
       ln -s busybox "/runtime/bin/${applet}"; \
     done; \
     ln -s ../../bin/busybox /runtime/usr/bin/env; \
