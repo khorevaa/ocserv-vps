@@ -1069,8 +1069,12 @@ health_check_stack() {
   udp_port="$(ocserv_config_value udp-port)"
   no_udp="$(ocserv_config_value no-udp false)"
   validate_port 'ocserv TCP port' "${tcp_port}"
-  validate_port 'ocserv UDP port' "${udp_port}"
   case "${no_udp,,}" in true | false) ;; *) die 'Invalid no-udp value in the managed ocserv configuration.' ;; esac
+  if [[ "${no_udp,,}" == true ]]; then
+    [[ "${udp_port}" == 0 ]] || die 'TCP-only ocserv must set udp-port = 0.'
+  else
+    validate_port 'ocserv UDP port' "${udp_port}"
+  fi
   expected_id="$(docker image inspect --format '{{.Id}}' "${expected_image}")"
   deadline=$((SECONDS + timeout_seconds))
   while (( SECONDS < deadline )); do
@@ -1080,7 +1084,13 @@ health_check_stack() {
       udp_ready=0
       camouflage_ready=1
       if listener_exists tcp "${tcp_port}" && listener_exists tcp "${vpn_port}"; then tcp_ready=1; fi
-      if [[ "${no_udp,,}" == true ]] || listener_exists udp "${udp_port}"; then udp_ready=1; fi
+      if [[ "${no_udp,,}" == true ]]; then
+        if ! listener_exists udp "${tcp_port}" && ! listener_exists udp "${vpn_port}"; then
+          udp_ready=1
+        fi
+      elif listener_exists udp "${udp_port}"; then
+        udp_ready=1
+      fi
       if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]]; then
         camouflage_ready=0
         camouflage_image="$(awk -F= '$1 == "OCSERV_CAMOUFLAGE_IMAGE" {print substr($0, index($0, "=") + 1); found++} END {if (found != 1) exit 1}' \
@@ -1099,7 +1109,7 @@ health_check_stack() {
             "${udp_ready}" == 1 && "${camouflage_ready}" == 1 ]] && \
         docker exec "${OCSERV_CONTAINER}" /usr/local/sbin/ocserv --version >/dev/null 2>&1; then
         if [[ "${no_udp,,}" == true ]]; then
-          info "Health check passed for ${expected_image}: public TCP ${vpn_port}, local ocserv TCP ${tcp_port}, DTLS disabled."
+          info "Health check passed for ${expected_image}: public TCP ${vpn_port}, local ocserv TCP ${tcp_port}, no UDP listener, DTLS disabled."
         else
           info "Health check passed for ${expected_image}: TCP ${tcp_port} and UDP ${udp_port} are listening."
         fi
@@ -1163,7 +1173,7 @@ health_check_ui_stack() {
 render_ocserv_config() {
   local domain="$1" vpn_network="$2" vpn_port="$3" dns_primary="$4" dns_secondary="$5"
   local camouflage="${6:-0}" camouflage_secret="${7:-}" camouflage_realm="${8:-}"
-  local advanced_camouflage="${9:-0}" tcp_port="${vpn_port}" listen_host='0.0.0.0'
+  local advanced_camouflage="${9:-0}" tcp_port="${vpn_port}" udp_port="${vpn_port}" listen_host='0.0.0.0'
   local transport_config='no-udp = false'
   local camouflage_config='camouflage = false'
   case "${camouflage}" in
@@ -1186,6 +1196,7 @@ camouflage_realm = \"${camouflage_realm}\""
       [[ "${camouflage}" == 1 || "${camouflage}" == true ]] || \
         die 'Advanced Camouflage requires native ocserv Camouflage.'
       tcp_port="${OCSERV_CAMOUFLAGE_TCP_PORT}"
+      udp_port=0
       listen_host='127.0.0.1'
       transport_config="no-udp = true
 listen-proxy-proto = true"
@@ -1196,7 +1207,7 @@ listen-proxy-proto = true"
   cat > "${OCSERV_CONFIG_DIR}/ocserv.conf" <<EOF
 auth = "plain[passwd=/etc/ocserv/ocpasswd]"
 tcp-port = ${tcp_port}
-udp-port = ${tcp_port}
+udp-port = ${udp_port}
 listen-host = ${listen_host}
 run-as-user = ocserv
 run-as-group = ocserv

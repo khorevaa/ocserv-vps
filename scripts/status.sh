@@ -56,7 +56,13 @@ if [[ "${OCSERV_TCP_PORT}" != "${VPN_PORT}" ]]; then
   if listener_exists tcp "${OCSERV_TCP_PORT}"; then printf 'listening\n'; else printf 'MISSING\n'; fi
 fi
 if [[ "${OCSERV_NO_UDP,,}" == true ]]; then
-  printf '%s\n' 'UDP/DTLS: disabled'
+  if [[ "${OCSERV_UDP_PORT}" == 0 ]] && \
+     ! listener_exists udp "${OCSERV_TCP_PORT}" && \
+     ! listener_exists udp "${VPN_PORT}"; then
+    printf '%s\n' 'UDP/DTLS: disabled (udp-port = 0, no listener)'
+  else
+    printf 'UDP/DTLS: MISCONFIGURED (udp-port = %s or UDP listener still present)\n' "${OCSERV_UDP_PORT}"
+  fi
 else
   printf 'UDP %s: ' "${OCSERV_UDP_PORT}"
   if listener_exists udp "${OCSERV_UDP_PORT}"; then printf 'listening\n'; else printf 'MISSING\n'; fi

@@ -257,6 +257,7 @@ render_vpn_journal_assets() { :; }
 render_ocserv_config vpn.example.com 10.66.0.0/24 443 1.1.1.1 1.0.0.1 \
   1 camouflage-secret-2026 'Test Environment' 1
 grep -q '^tcp-port = 8443$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
+grep -q '^udp-port = 0$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
 grep -q '^listen-host = 127.0.0.1$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
 grep -q '^no-udp = true$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
 grep -q '^listen-proxy-proto = true$' "${OCSERV_CONFIG_DIR}/ocserv.conf"

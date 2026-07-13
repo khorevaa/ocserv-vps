@@ -95,7 +95,7 @@ sudo -E ocserv-vps install
 
 The custom URL must return the file directly over HTTPS without a redirect, contain no credentials or fragment, and resolve only to public IPv4 addresses different from the VPN endpoint. Both the download and unpacked website are limited to 10 MiB and 1,000 entries; links, special files, and unsafe archive paths are rejected. The URL is not persisted in Nginx or state. Only deploy content you are authorized to use.
 
-UDP/DTLS is intentionally disabled in this mode: UDP/443 is not opened in the firewall and ocserv receives `no-udp = true`. Public port `443` is required.
+UDP/DTLS is intentionally disabled completely in this mode: UDP/443 is not opened in the firewall and ocserv receives `udp-port = 0` plus `no-udp = true`, so it does not create even a local UDP listener. Public port `443` is required.
 
 Browser routing relies on HTTP/2 ALPN. An HTTP/1.1-only browser or a purpose-built probe reaches ocserv's native Camouflage response (404/401), so this mode improves the appearance of ordinary browsing but does not claim to be indistinguishable under active analysis.
 

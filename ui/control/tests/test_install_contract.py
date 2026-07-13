@@ -566,6 +566,7 @@ class InstallComposeContractTests(unittest.TestCase):
             "create_password_user() {", 1
         )[0]
         self.assertIn("tcp_port=\"${OCSERV_CAMOUFLAGE_TCP_PORT}\"", rendered)
+        self.assertIn("udp_port=0", rendered)
         self.assertIn("listen_host='127.0.0.1'", rendered)
         self.assertIn("no-udp = true", rendered)
         self.assertIn("listen-proxy-proto = true", rendered)
@@ -582,7 +583,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertNotIn("proxy_ssl_", nginx)
         self.assertNotIn("CAMOUFLAGE_DOWNLOAD_URL", nginx)
         self.assertNotIn("proxy_pass https://127.0.0.1", nginx)
-        self.assertIn("UDP/DTLS: disabled", status)
+        self.assertIn("UDP/DTLS: disabled (udp-port = 0, no listener)", status)
         self.assertIn('"${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"', uninstaller)
         self.assertNotIn("systemctl reload nginx", uninstaller)
 
