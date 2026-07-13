@@ -28,6 +28,7 @@ var secretPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43,256}$`)
 var uiImagePattern = regexp.MustCompile(`^ghcr\.io/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 var vpnDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$`)
 var sshForwardPattern = regexp.MustCompile(`^localhost:[0-9]{1,5}:/[A-Za-z0-9._/-]+$`)
+var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$`)
 
 type application struct {
 	config       config
@@ -212,12 +213,19 @@ func remoteIdentity(request *http.Request) string {
 	return "ssh-tunnel"
 }
 
+func (a *application) recordAudit(record auditRecord) {
+	if err := a.store.audit(record); err != nil {
+		log.Printf("audit persistence failed (action=%s success=%t): %v", record.Action, record.Success, err)
+	}
+}
+
 func (a *application) exchangeSecret(writer http.ResponseWriter, request *http.Request) {
 	noStore(writer.Header())
 	var payload struct {
 		Secret string `json:"secret"`
 	}
 	if decodeStrict(request, &payload) != nil || !secretPattern.MatchString(payload.Secret) || len(payload.Secret) != len(a.accessSecret) || subtle.ConstantTimeCompare([]byte(payload.Secret), a.accessSecret) != 1 {
+		a.recordAudit(auditRecord{Actor: "unknown", Action: "access", Success: false, Remote: remoteIdentity(request)})
 		notFound(writer)
 		return
 	}
@@ -227,9 +235,7 @@ func (a *application) exchangeSecret(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, 500, map[string]string{"detail": "session creation failed"})
 		return
 	}
-	if err := a.store.audit(auditRecord{Actor: "operator", Action: "access", Success: true, Remote: remoteIdentity(request)}); err != nil {
-		log.Printf("audit persistence failed: %v", err)
-	}
+	a.recordAudit(auditRecord{Actor: "operator", Action: "access", Success: true, Remote: remoteIdentity(request)})
 	http.SetCookie(writer, &http.Cookie{Name: "__Host-ocserv_ui_session", Value: session.Token, Path: "/", MaxAge: int(a.config.SessionTTLSeconds), Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	writeJSON(writer, http.StatusOK, map[string]any{"user": map[string]string{"username": "operator", "role": "operator"}, "expires_at": session.ExpiresAt, "csrf_token": session.CSRFToken})
 }
@@ -256,7 +262,7 @@ func (a *application) logout(writer http.ResponseWriter, request *http.Request, 
 		writeJSON(writer, 500, map[string]string{"detail": "logout failed"})
 		return
 	}
-	_ = a.store.audit(auditRecord{Actor: "operator", Action: "logout", Success: true, Remote: remoteIdentity(request)})
+	a.recordAudit(auditRecord{Actor: "operator", Action: "logout", Success: true, Remote: remoteIdentity(request)})
 	http.SetCookie(writer, &http.Cookie{Name: "__Host-ocserv_ui_session", Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	writer.WriteHeader(http.StatusNoContent)
 }
@@ -298,7 +304,7 @@ func (a *application) uiInfo(writer http.ResponseWriter) {
 		image = a.config.UIImage
 	}
 	safeVersion := any(nil)
-	if regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$`).MatchString(version) {
+	if versionPattern.MatchString(version) {
 		safeVersion = version
 	}
 	noStore(writer.Header())
@@ -323,7 +329,7 @@ func (a *application) revealAccessSecret(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"detail": "UI access secret is unavailable"})
 		return
 	}
-	_ = a.store.audit(auditRecord{Actor: "operator", Action: "copy_ui_access_secret", Success: true, Remote: remoteIdentity(request)})
+	a.recordAudit(auditRecord{Actor: "operator", Action: "copy_ui_access_secret", Success: true, Remote: remoteIdentity(request)})
 	writeJSON(writer, http.StatusOK, map[string]string{"access_secret": secret})
 }
 
@@ -334,7 +340,7 @@ func (a *application) restartService(writer http.ResponseWriter, request *http.R
 	}
 	raw, err := a.control.request("restart_service", nil)
 	if err == nil {
-		_ = a.store.audit(auditRecord{Actor: "operator", Action: "restart_service", Success: true, Remote: remoteIdentity(request)})
+		a.recordAudit(auditRecord{Actor: "operator", Action: "restart_service", Success: true, Remote: remoteIdentity(request)})
 	}
 	a.controlResponse(writer, raw, err, nil)
 }
@@ -346,7 +352,7 @@ func (a *application) renewCertificate(writer http.ResponseWriter, request *http
 	}
 	raw, err := a.control.request("renew_certificate", nil)
 	if err == nil {
-		_ = a.store.audit(auditRecord{Actor: "operator", Action: "renew_certificate", Success: true, Remote: remoteIdentity(request)})
+		a.recordAudit(auditRecord{Actor: "operator", Action: "renew_certificate", Success: true, Remote: remoteIdentity(request)})
 	}
 	a.controlResponse(writer, raw, err, nil)
 }
@@ -376,7 +382,7 @@ func (a *application) exportUsers(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusBadGateway, map[string]string{"detail": "invalid control response"})
 		return
 	}
-	_ = a.store.audit(auditRecord{Actor: "operator", Action: "export_users", Success: true, Remote: remoteIdentity(request), Details: map[string]any{"count": len(users)}})
+	a.recordAudit(auditRecord{Actor: "operator", Action: "export_users", Success: true, Remote: remoteIdentity(request), Details: map[string]any{"count": len(users)}})
 	writer.Header().Set("Content-Disposition", `attachment; filename="ocserv-vps-users.json"`)
 	writeJSON(writer, http.StatusOK, backup)
 }
@@ -416,7 +422,7 @@ func (a *application) importUsers(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusBadGateway, map[string]string{"detail": "invalid control response"})
 		return
 	}
-	_ = a.store.audit(auditRecord{Actor: "operator", Action: "import_users", Target: payload.Mode, Success: true, Remote: remoteIdentity(request), Details: map[string]any{
+	a.recordAudit(auditRecord{Actor: "operator", Action: "import_users", Target: payload.Mode, Success: true, Remote: remoteIdentity(request), Details: map[string]any{
 		"imported": result["imported"], "created": result["created"], "updated": result["updated"], "removed": result["removed"],
 	}})
 	writeJSON(writer, http.StatusOK, result)
@@ -449,7 +455,7 @@ func (a *application) disconnectConnection(writer http.ResponseWriter, request *
 	}
 	raw, controlErr := a.control.request("disconnect_connection", map[string]any{"id": id})
 	if controlErr == nil {
-		_ = a.store.audit(auditRecord{Actor: "operator", Action: "disconnect_connection", Target: strconv.Itoa(id), Success: true, Remote: remoteIdentity(request)})
+		a.recordAudit(auditRecord{Actor: "operator", Action: "disconnect_connection", Target: strconv.Itoa(id), Success: true, Remote: remoteIdentity(request)})
 	}
 	a.controlResponse(writer, raw, controlErr, nil)
 }
@@ -468,7 +474,7 @@ func (a *application) addUser(writer http.ResponseWriter, request *http.Request,
 	}
 	raw, err := a.control.request("add_user", map[string]any{"username": payload.Username})
 	if err == nil {
-		_ = a.store.audit(auditRecord{Actor: "operator", Action: "add_user", Target: payload.Username, Success: true, Remote: remoteIdentity(request)})
+		a.recordAudit(auditRecord{Actor: "operator", Action: "add_user", Target: payload.Username, Success: true, Remote: remoteIdentity(request)})
 	}
 	if err != nil {
 		a.controlResponse(writer, raw, err, nil)
@@ -501,7 +507,7 @@ func (a *application) rotatePassword(writer http.ResponseWriter, request *http.R
 	}
 	raw, err := a.control.request("rotate_password", map[string]any{"username": username, "terminate_sessions": payload.TerminateSessions})
 	if err == nil {
-		_ = a.store.audit(auditRecord{Actor: "operator", Action: "rotate_password", Target: username, Success: true, Remote: remoteIdentity(request), Details: map[string]any{"terminate_sessions": payload.TerminateSessions}})
+		a.recordAudit(auditRecord{Actor: "operator", Action: "rotate_password", Target: username, Success: true, Remote: remoteIdentity(request), Details: map[string]any{"terminate_sessions": payload.TerminateSessions}})
 	}
 	a.controlResponse(writer, raw, err, nil)
 }

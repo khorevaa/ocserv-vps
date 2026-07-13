@@ -103,11 +103,18 @@ curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-delay 3 \
 }
 
 while IFS= read -r member; do
-  [[ "${member}" != /* && "${member}" != *'/../'* && "${member}" != '../'* ]] || {
+  [[ "${member}" != /* && "${member}" != *'/../'* && "${member}" != '../'* \
+     && "${member}" != *'/..' && "${member}" != '..' ]] || {
     echo -e "${red}Unsafe path in the release archive: ${member}.${plain}" >&2
     exit 1
   }
 done < <(tar -tzf "${archive}")
+# Reject symlink and hardlink members: their targets are not covered by the path
+# check above and `cp -a` would faithfully reproduce an escape link as root.
+if tar -tvzf "${archive}" | awk '{ print substr($1, 1, 1) }' | grep -qE '^[lh]$'; then
+  echo -e "${red}Release archive contains a symlink or hardlink; refusing to extract.${plain}" >&2
+  exit 1
+fi
 tar -xzf "${archive}" -C "${unpack}"
 
 source_root="$(find "${unpack}" -mindepth 1 -maxdepth 1 -type d -name 'ocserv-vps-*' -print -quit)"

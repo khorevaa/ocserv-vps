@@ -17,7 +17,9 @@ Options:
   --local-port <port>        Optional expected port; normally read from the VPS
   --ssh-port <port>          Default: 22
   --identity-file <path>
-  --ssh-password <pass>
+  --ssh-password-file <path> Read the SSH password from a file (via sshpass).
+                             The password is never passed on the command line.
+                             You may instead export OCSERV_UI_TUNNEL_PASSWORD.
   --accept-new-host-key
   -h, --help
 EOF
@@ -27,7 +29,7 @@ HOST=""
 LOCAL_PORT=""
 SSH_PORT="22"
 IDENTITY_FILE=""
-SSH_PASSWORD=""
+SSH_PASSWORD_FILE=""
 ACCEPT_NEW_HOST_KEY="0"
 REMOTE_SOCKET="/run/ocserv-ui-web/web.sock"
 
@@ -37,7 +39,7 @@ while [[ $# -gt 0 ]]; do
     --local-port) ocserv_require_value "$1" "${2:-}"; LOCAL_PORT="$2"; shift 2 ;;
     --ssh-port) ocserv_require_value "$1" "${2:-}"; SSH_PORT="$2"; shift 2 ;;
     --identity-file) ocserv_require_value "$1" "${2:-}"; IDENTITY_FILE="$2"; shift 2 ;;
-    --ssh-password) ocserv_require_value "$1" "${2:-}"; SSH_PASSWORD="$2"; shift 2 ;;
+    --ssh-password-file) ocserv_require_value "$1" "${2:-}"; SSH_PASSWORD_FILE="$2"; shift 2 ;;
     --accept-new-host-key) ACCEPT_NEW_HOST_KEY="1"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -63,13 +65,33 @@ fi
 if [[ "${ACCEPT_NEW_HOST_KEY}" == "1" ]]; then
   ssh_common_args+=( -o StrictHostKeyChecking=accept-new )
 fi
-if [[ -z "${SSH_PASSWORD}" ]]; then
+# Resolve an optional SSH password without ever placing it on the command line:
+# sshpass -f reads it from a file, sshpass -e from the SSHPASS environment
+# variable. Both keep it out of argv (and therefore out of `ps`).
+password_source=""
+if [[ -n "${SSH_PASSWORD_FILE}" ]]; then
+  [[ -r "${SSH_PASSWORD_FILE}" ]] || { printf '%s\n' 'SSH password file is not readable.' >&2; exit 2; }
+  password_source="file"
+elif [[ -n "${OCSERV_UI_TUNNEL_PASSWORD:-}" ]]; then
+  password_source="env"
+fi
+
+if [[ -z "${password_source}" ]]; then
   ssh_common_args+=( -o BatchMode=yes )
 fi
 
-runner=(bash "${SCRIPT_DIR}/ssh-with-password.sh")
-if [[ -n "${SSH_PASSWORD}" ]]; then
-  runner+=(--ssh-password "${SSH_PASSWORD}")
+runner=(ssh)
+if [[ -n "${password_source}" ]]; then
+  command -v sshpass >/dev/null 2>&1 || {
+    printf '%s\n' 'sshpass is required for password authentication; install it or use --identity-file.' >&2
+    exit 2
+  }
+  if [[ "${password_source}" == "file" ]]; then
+    runner=(sshpass -f "${SSH_PASSWORD_FILE}" ssh)
+  else
+    export SSHPASS="${OCSERV_UI_TUNNEL_PASSWORD}"
+    runner=(sshpass -e ssh)
+  fi
 fi
 
 metadata="$("${runner[@]}" "${ssh_common_args[@]}" -- "${HOST}" \
