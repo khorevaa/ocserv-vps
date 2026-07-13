@@ -12,6 +12,7 @@ A ready-to-run [ocserv](https://www.infradead.org/ocserv/) VPN server for your o
 - obtains and renews a Let's Encrypt TLS certificate;
 - creates VPN users with secure one-time passwords;
 - displays server health, active connections, and the event journal;
+- bounds the VPN journal: after 4 MiB it retains the newest 10,000 events;
 - updates and rolls back the server image without manual configuration edits;
 - provides a web panel without a public HTTP port or Docker socket access;
 - supports both an interactive menu and automation-friendly commands.
