@@ -94,7 +94,8 @@ func (s *controlService) listContainerLogs(source string, page, pageSize int, or
 	if end > total {
 		end = total
 	}
-	pageEntries := append([]containerLogEntry(nil), entries[start:end]...)
+	pageEntries := make([]containerLogEntry, end-start)
+	copy(pageEntries, entries[start:end])
 	return map[string]any{
 		"entries": pageEntries, "page": page, "page_size": pageSize, "total": total,
 		"total_pages": totalPages, "sort": order, "source": source,
