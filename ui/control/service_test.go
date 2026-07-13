@@ -27,6 +27,7 @@ type fakeRunner struct {
 	failReload    bool
 	failTerminate bool
 	failConfig    bool
+	noSessions    bool
 	calls         [][]string
 	inputs        []string
 }
@@ -78,6 +79,9 @@ func (f *fakeRunner) Run(argv []string, stdin string) (commandOutput, error) {
 	case reflect.DeepEqual(command, []string{"show", "status"}):
 		return commandOutput{stdout: `{"Status":"online","uptime":1234,"Active sessions":2,"Private backend detail":"must-not-leak"}`}, nil
 	case reflect.DeepEqual(command, []string{"show", "users"}):
+		if f.noSessions {
+			return commandOutput{stdout: `[]`}, nil
+		}
 		return commandOutput{stdout: `[{"ID":41,"Username":"alice","Remote IP":"192.0.2.1","IPv4":"10.66.0.8","raw_connected_at":1783850400},{"ID":42,"Username":"alice","Remote IP":"192.0.2.2","IPv4":"10.66.0.9","raw_connected_at":1783850460}]`}, nil
 	case reflect.DeepEqual(command, []string{"reload"}):
 		if f.failReload {
@@ -317,8 +321,13 @@ func TestAddUserReturnsOneTimePasswordAndConflicts(t *testing.T) {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 	connection := result["connection"].(map[string]any)
-	if connection["server"] != "https://vpn.example.com:443/" || connection["protocol"] != "anyconnect" || !strings.Contains(connection["text"].(string), password) {
+	profileText := connection["text"].(string)
+	cliCommand := connection["cli"].(string)
+	if connection["server"] != "https://vpn.example.com:443/" || connection["protocol"] != "anyconnect" || !strings.Contains(profileText, password) {
 		t.Fatalf("unexpected connection profile: %#v", connection)
+	}
+	if cliCommand != "openconnect --protocol=anyconnect --user=bob https://vpn.example.com:443/" || strings.Contains(cliCommand, password) || strings.Contains(profileText, "openconnect") {
+		t.Fatalf("CLI command and text profile were not separated safely: %#v", connection)
 	}
 	content, _ := os.ReadFile(cfg.PasswordPath)
 	if !strings.Contains(string(content), "bob:*:newhash") {
@@ -331,6 +340,44 @@ func TestAddUserReturnsOneTimePasswordAndConflicts(t *testing.T) {
 	}
 	_, err = service.addUser("bob")
 	assertControlError(t, err, 409, "user_exists")
+}
+
+func TestDeleteUserRemovesPasswordRecordAndTerminatesSessions(t *testing.T) {
+	service, runner, cfg := testService(t)
+	result, err := service.deleteUser("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["username"] != "alice" || result["deleted"] != true || result["sessions_terminated"] != true {
+		t.Fatalf("unexpected delete result: %#v", result)
+	}
+	content, err := os.ReadFile(cfg.PasswordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "alice:") {
+		t.Fatalf("deleted user remains in password file: %q", content)
+	}
+	if !hasRunnerCall(runner.calls, []string{"reload"}) || !hasRunnerCall(runner.calls, []string{"terminate", "user", "alice"}) {
+		t.Fatalf("missing reload or session termination: %#v", runner.calls)
+	}
+	_, err = service.deleteUser("alice")
+	assertControlError(t, err, 404, "user_not_found")
+}
+
+func TestDeleteUserWithoutActiveSessionsSkipsTerminationWithoutWarning(t *testing.T) {
+	service, runner, _ := testService(t)
+	runner.noSessions = true
+	result, err := service.deleteUser("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["sessions_terminated"] != true || result["warning"] != nil {
+		t.Fatalf("unexpected delete result without sessions: %#v", result)
+	}
+	if hasRunnerCall(runner.calls, []string{"terminate", "user", "alice"}) {
+		t.Fatalf("session termination must be skipped without active sessions: %#v", runner.calls)
+	}
 }
 
 func TestUserBackupExportAndMergeImportPreserveHashes(t *testing.T) {

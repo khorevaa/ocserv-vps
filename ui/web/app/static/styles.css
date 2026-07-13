@@ -980,29 +980,6 @@ svg {
   user-select: all;
 }
 
-.secret-mask {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.secret-mask code {
-  padding: 5px 9px;
-  color: var(--text-strong);
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-  letter-spacing: 0.08em;
-}
-
-.secret-mask span {
-  color: var(--green);
-  font-size: 13px;
-  font-weight: 650;
-}
-
 .card-heading {
   display: flex;
   align-items: center;
@@ -1241,6 +1218,23 @@ tbody tr:hover {
 .row-action--danger:hover:not(:disabled) {
   background: var(--red-soft);
   border-color: var(--red-soft);
+}
+
+.row-action--icon {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.user-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .connections-table,
@@ -1556,12 +1550,15 @@ tbody tr:hover {
   font-weight: 620;
 }
 
-.password-output {
+.password-output,
+.credential-cli-output {
   display: flex;
   gap: 9px;
 }
 
-.password-output input {
+.password-output input,
+.credential-cli-output input {
+  min-width: 0;
   width: 100%;
   padding: 0 12px;
   font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
@@ -1591,6 +1588,78 @@ tbody tr:hover {
   flex-wrap: wrap;
   gap: 9px;
   margin-top: 10px;
+}
+
+.credential-help {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+#credential-modal .modal-header {
+  padding: 14px 22px 12px;
+}
+
+#credential-modal .modal-header h2 {
+  font-size: 20px;
+}
+
+#credential-modal .modal-body {
+  padding: 14px 22px;
+}
+
+#credential-modal .one-time-warning {
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+}
+
+#credential-modal .credential-list {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.32fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+#credential-modal .credential-list > div + div {
+  margin-top: 0;
+}
+
+#credential-modal .credential-list > div:nth-child(n + 3) {
+  grid-column: 1 / -1;
+}
+
+#credential-modal .credential-list dt {
+  margin-bottom: 4px;
+}
+
+#credential-modal .button {
+  min-height: 36px;
+  padding-inline: 13px;
+}
+
+#credential-modal .config-output {
+  height: 112px;
+  min-height: 112px;
+  overflow-y: hidden;
+  resize: none;
+  padding: 9px 11px;
+  line-height: 1.4;
+}
+
+#credential-modal .credential-config-actions {
+  gap: 7px;
+  margin-top: 7px;
+}
+
+#credential-modal .credential-help {
+  margin-top: 5px;
+  line-height: 1.3;
+}
+
+#credential-modal .modal-actions {
+  padding: 10px 22px;
 }
 
 .configuration-note {
@@ -1967,11 +2036,21 @@ tbody tr:hover {
     padding-inline: 19px;
   }
 
-  .password-output {
+  #credential-modal .credential-list {
+    display: block;
+  }
+
+  #credential-modal .credential-list > div + div {
+    margin-top: 12px;
+  }
+
+  .password-output,
+  .credential-cli-output {
     flex-direction: column;
   }
 
-  .password-output .button {
+  .password-output .button,
+  .credential-cli-output .button {
     width: 100%;
   }
 

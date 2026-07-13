@@ -91,6 +91,7 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		"restart_service":       {"request_id": true, "action": true},
 		"renew_certificate":     {"request_id": true, "action": true},
 		"add_user":              {"request_id": true, "action": true, "username": true},
+		"delete_user":           {"request_id": true, "action": true, "username": true},
 		"rotate_password":       {"request_id": true, "action": true, "username": true, "terminate_sessions": true},
 	}
 	keys, known := allowed[action]
@@ -161,6 +162,9 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 	}
 	if action == "add_user" {
 		return s.addUser(username)
+	}
+	if action == "delete_user" {
+		return s.deleteUser(username)
 	}
 	terminate := true
 	if value, exists := request["terminate_sessions"]; exists {
@@ -484,7 +488,7 @@ func (s *controlService) importUsers(raw any, mode string) (map[string]any, erro
 			return nil, controlFailure(500, "snapshot_cleanup_failed", "The password snapshot could not be removed safely.")
 		}
 		for username := range affected {
-			if _, terminateErr := s.runOCCTL("terminate", "user", username); terminateErr != nil {
+			if !s.terminateUserSessions(username) {
 				sessionsTerminated = false
 			}
 		}
@@ -516,6 +520,61 @@ func (s *controlService) addUser(username string) (map[string]any, error) {
 	return s.changePassword(username)
 }
 
+func (s *controlService) deleteUser(username string) (map[string]any, error) {
+	lock, err := acquireFileLock(s.config.OperationLock)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	records, err := s.readPasswordRecords()
+	if err != nil {
+		return nil, err
+	}
+	retained := make([]userBackupRecord, 0, len(records))
+	found := false
+	for _, record := range records {
+		if record.Username == username {
+			found = true
+			continue
+		}
+		retained = append(retained, record)
+	}
+	if !found {
+		return nil, controlFailure(404, "user_not_found", "The VPN user does not exist.")
+	}
+	snapshot, err := capturePasswordSnapshot(s.config.PasswordPath)
+	if err != nil {
+		return nil, err
+	}
+	mutationErr := func() error {
+		if writeErr := writePasswordRecords(s.config.PasswordPath, retained); writeErr != nil {
+			return writeErr
+		}
+		verified, readErr := s.readPasswordRecords()
+		if readErr != nil || !sameUserBackupRecords(verified, retained) {
+			return controlFailure(503, "backend_error", "The VPN user could not be removed safely.")
+		}
+		_, reloadErr := s.runOCCTL("reload")
+		return reloadErr
+	}()
+	if mutationErr != nil {
+		if rollbackErr := snapshot.Rollback(); rollbackErr != nil {
+			return nil, controlFailure(500, "rollback_failed", "The password database could not be restored safely.")
+		}
+		_, _ = s.runOCCTL("reload")
+		return nil, mutationErr
+	}
+	if err = snapshot.Commit(); err != nil {
+		return nil, controlFailure(500, "snapshot_cleanup_failed", "The password snapshot could not be removed safely.")
+	}
+	result := map[string]any{"username": username, "deleted": true, "sessions_terminated": true}
+	if !s.terminateUserSessions(username) {
+		result["sessions_terminated"] = false
+		result["warning"] = "session_termination_failed"
+	}
+	return result, nil
+}
+
 func (s *controlService) rotatePassword(username string, terminate bool) (map[string]any, error) {
 	lock, err := acquireFileLock(s.config.OperationLock)
 	if err != nil {
@@ -535,13 +594,22 @@ func (s *controlService) rotatePassword(username string, terminate bool) (map[st
 	}
 	result["sessions_terminated"] = false
 	if terminate {
-		if _, terminateErr := s.runOCCTL("terminate", "user", username); terminateErr != nil {
+		if !s.terminateUserSessions(username) {
 			result["warning"] = "session_termination_failed"
 		} else {
 			result["sessions_terminated"] = true
 		}
 	}
 	return result, nil
+}
+
+func (s *controlService) terminateUserSessions(username string) bool {
+	data, err := s.occtlJSON("show", "users")
+	if err == nil && !contains(activeUsernames(data), username) {
+		return true
+	}
+	_, err = s.runOCCTL("terminate", "user", username)
+	return err == nil
 }
 
 func (s *controlService) changePassword(username string) (map[string]any, error) {
@@ -600,12 +668,13 @@ func (s *controlService) connectionProfile(username, password string) (map[strin
 	}
 	server := fmt.Sprintf("https://%s:%d/", domain, port)
 	profileText := fmt.Sprintf(
-		"# ocserv-vps connection profile\nserver=%s\nprotocol=anyconnect\nusername=%s\npassword=%s\n\n# OpenConnect CLI (the password will be requested)\nopenconnect --protocol=anyconnect --user=%s %s\n",
-		server, username, password, username, server,
+		"# ocserv-vps connection profile\nserver=%s\nprotocol=anyconnect\nusername=%s\npassword=%s\n",
+		server, username, password,
 	)
+	cliCommand := fmt.Sprintf("openconnect --protocol=anyconnect --user=%s %s", username, server)
 	return map[string]any{
 		"server": server, "host": domain, "port": port, "protocol": "anyconnect",
-		"username": username, "password": password, "text": profileText,
+		"username": username, "password": password, "cli": cliCommand, "text": profileText,
 	}, nil
 }
 

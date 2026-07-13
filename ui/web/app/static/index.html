@@ -65,6 +65,9 @@
       <circle cx="8" cy="12" r="4"></circle>
       <path d="M12 12h9M17 12v3M20 12v2"></path>
     </symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24">
+      <path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"></path>
+    </symbol>
     <symbol id="icon-copy" viewBox="0 0 24 24">
       <rect x="8" y="8" width="11" height="12" rx="2"></rect>
       <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"></path>
@@ -130,6 +133,10 @@
             <svg aria-hidden="true"><use href="#icon-overview"></use></svg>
             <span>Состояние системы</span>
           </a>
+          <a class="nav-item" href="#users" data-view="users">
+            <svg aria-hidden="true"><use href="#icon-users"></use></svg>
+            <span>Пользователи</span>
+          </a>
           <a class="nav-item" href="#connections" data-view="connections">
             <svg aria-hidden="true"><use href="#icon-connections"></use></svg>
             <span>Подключения</span>
@@ -141,10 +148,6 @@
           <a class="nav-item" href="#logs" data-view="logs">
             <svg aria-hidden="true"><use href="#icon-logs"></use></svg>
             <span>Логи сервера</span>
-          </a>
-          <a class="nav-item" href="#users" data-view="users">
-            <svg aria-hidden="true"><use href="#icon-users"></use></svg>
-            <span>Пользователи</span>
           </a>
           <a class="nav-item" href="#configuration" data-view="configuration">
             <svg aria-hidden="true"><use href="#icon-config"></use></svg>
@@ -256,9 +259,7 @@
                 </div>
                 <div>
                   <dt>Секрет доступа</dt>
-                  <dd class="secret-mask">
-                    <code id="ui-access-mask">••••••••••••••••</code>
-                    <span id="ui-access-state">Секрет настроен</span>
+                  <dd class="copy-value">
                     <button id="copy-ui-secret-button" class="button button--secondary" type="button">
                       <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
                       <span>Копировать секрет</span>
@@ -584,6 +585,29 @@
       </form>
     </section>
 
+    <section id="delete-user-modal" class="modal is-hidden" role="dialog" aria-modal="true" aria-labelledby="delete-user-title">
+      <header class="modal-header">
+        <div>
+          <p class="eyebrow">VPN-доступ</p>
+          <h2 id="delete-user-title">Удалить пользователя?</h2>
+        </div>
+        <button class="icon-button modal-close" type="button" aria-label="Закрыть окно">
+          <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+        </button>
+      </header>
+      <form id="delete-user-form">
+        <div class="modal-body">
+          <div id="delete-user-error" class="alert alert--danger is-hidden" role="alert"></div>
+          <p>Пользователь <strong id="delete-username"></strong> потеряет доступ к VPN.</p>
+          <p class="modal-note modal-note--warning">Активные VPN-сессии будут завершены. Это действие нельзя отменить.</p>
+        </div>
+        <footer class="modal-actions">
+          <button class="button button--secondary modal-close" type="button">Отмена</button>
+          <button id="delete-user-submit" class="button button--danger" type="submit">Удалить пользователя</button>
+        </footer>
+      </form>
+    </section>
+
     <section id="import-users-modal" class="modal is-hidden" role="dialog" aria-modal="true" aria-labelledby="import-users-title">
       <header class="modal-header">
         <div>
@@ -622,7 +646,7 @@
       <div class="modal-body">
         <div class="one-time-warning">
           <svg aria-hidden="true"><use href="#icon-key"></use></svg>
-          <p><strong>Пароль показывается только один раз.</strong><br>Скопируйте его перед закрытием окна.</p>
+          <p><strong>Пароль показывается только один раз.</strong> Скопируйте его перед закрытием окна.</p>
         </div>
         <dl class="credential-list">
           <div>
@@ -640,20 +664,33 @@
             </dd>
           </div>
           <div>
-            <dt>Конфигурация подключения для телефона или роутера</dt>
+            <dt>Команда для OpenConnect CLI</dt>
             <dd>
-              <textarea id="credential-config" class="config-output" readonly autocomplete="off" spellcheck="false" aria-label="Текстовая конфигурация VPN"></textarea>
+              <div class="credential-cli-output">
+                <input id="credential-cli" type="text" readonly autocomplete="off" spellcheck="false" aria-label="Команда OpenConnect CLI">
+                <button id="copy-cli-button" class="button button--secondary" type="button">
+                  <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
+                  <span>Копировать команду</span>
+                </button>
+              </div>
+              <p class="credential-help">OpenConnect запросит пароль после запуска команды.</p>
+            </dd>
+          </div>
+          <div>
+            <dt>Текстовая конфигурация для телефона или роутера</dt>
+            <dd>
+              <textarea id="credential-config" class="config-output" readonly autocomplete="off" spellcheck="false" wrap="off" aria-label="Текстовая конфигурация VPN"></textarea>
               <div class="credential-config-actions">
                 <button id="copy-config-button" class="button button--secondary" type="button">
                   <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
-                  <span>Копировать конфигурацию</span>
+                  <span>Копировать текст</span>
                 </button>
                 <button id="download-config-button" class="button button--secondary" type="button">
                   <svg aria-hidden="true"><use href="#icon-download"></use></svg>
                   <span>Скачать .txt</span>
                 </button>
               </div>
-              <p class="field-help">Тип VPN: Cisco AnyConnect / OpenConnect. Пароль также находится в тексте и показывается только в этом окне.</p>
+              <p class="credential-help">Тип VPN: Cisco AnyConnect / OpenConnect. Текст содержит пароль и показывается только в этом окне.</p>
             </dd>
           </div>
         </dl>
