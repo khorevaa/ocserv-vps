@@ -1,22 +1,41 @@
-[English](README.md) | [Русский](README_RU.md)
+[Русский](README.md) · [English](README_EN.md)
 
 # ocserv-vps
 
-Verified Docker build of ocserv, a private management UI, and a standalone installer for a fresh Debian or Ubuntu VPS.
+Готовый VPN-сервер на базе [ocserv](https://www.infradead.org/ocserv/) для собственного VPS: установка одной командой, управление пользователями и закрытая веб-панель.
 
-The VPN container is built from an explicit upstream release after SHA-256 and GPG verification. The UI is split into an unprivileged web container and a narrowly privileged control sidecar. It exposes only a Unix socket and is reached through an SSH local forward; no public UI port, nginx proxy, or Docker socket is used.
+![Панель управления ocserv-vps](docs/images/ui-overview.png)
 
-## Quick install
+## Возможности
 
-Run interactively as root:
+- установка ocserv, Docker и необходимых системных пакетов на чистый Debian или Ubuntu;
+- выпуск и автоматическое обновление TLS-сертификата Let's Encrypt;
+- создание пользователей с безопасными одноразовыми паролями;
+- просмотр состояния сервера, активных подключений и журнала событий;
+- обновление и откат серверного образа без ручного редактирования конфигурации;
+- отдельная веб-панель без публичного HTTP-порта и доступа к Docker socket;
+- интерактивное меню и команды для автоматизации.
+
+## Требования
+
+- VPS с Debian или Ubuntu и архитектурой `amd64`;
+- доступ `root` или возможность выполнить команду через `sudo`;
+- домен с A-записью, направленной на публичный IP сервера;
+- доступные TCP/UDP-порты VPN и рабочее SSH-подключение.
+
+> Установка меняет правила firewall и перезапускает сетевые сервисы. Не закрывайте текущую SSH-сессию до завершения проверки VPN.
+
+## Быстрая установка
+
+Запустите от `root`:
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh)
 ```
 
-The installer follows the 3x-ui installation model: it detects the OS and architecture, installs base dependencies, resolves the latest GitHub release (or accepts an explicit tag), installs the `ocserv-vps` manager, and starts the configuration flow.
+Скрипт определит ОС и архитектуру, установит зависимости и команду `ocserv-vps`, после чего запустит пошаговую настройку сервера.
 
-For an unattended installation:
+Для установки без диалогов:
 
 ```bash
 curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh | \
@@ -28,67 +47,76 @@ curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.s
   bash
 ```
 
-When stdin is not interactive and `OCSERV_DOMAIN` is not set, the bootstrap is intentionally skipped after installing the manager. Continue with `sudo ocserv-vps install`.
+Если переменная `OCSERV_DOMAIN` не задана и stdin не интерактивен, установится только менеджер. Настройку можно продолжить командой:
 
-Install a specific manager release:
+```bash
+sudo ocserv-vps install
+```
+
+Конкретную версию менеджера можно указать аргументом:
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.0
 ```
 
-## Manager
+## Управление
 
-Run `ocserv-vps` without arguments for the interactive menu. Direct commands are also available:
+Запустите `sudo ocserv-vps` без аргументов, чтобы открыть интерактивное меню.
 
-```text
-ocserv-vps install
-ocserv-vps status
-ocserv-vps add-user <username>
-ocserv-vps update
-ocserv-vps rollback
-ocserv-vps install-ui
-ocserv-vps update-ui
-ocserv-vps ui-access
-ocserv-vps rotate-ui-access
-ocserv-vps start|stop|restart
-ocserv-vps logs
-ocserv-vps update-manager [tag]
-ocserv-vps uninstall [--purge-data]
-```
+| Команда | Назначение |
+| --- | --- |
+| `ocserv-vps install` | Первичная настройка VPN-сервера |
+| `ocserv-vps status` | Состояние сервиса и сертификата |
+| `ocserv-vps add-user <имя>` | Создать пользователя |
+| `ocserv-vps update` | Обновить серверный образ |
+| `ocserv-vps rollback` | Откатить последнее обновление |
+| `ocserv-vps install-ui` | Установить веб-панель |
+| `ocserv-vps update-ui` | Обновить веб-панель |
+| `ocserv-vps ui-access` | Показать секрет и команду SSH-туннеля |
+| `ocserv-vps rotate-ui-access` | Сменить секрет доступа к панели |
+| `ocserv-vps start\|stop\|restart` | Управлять сервисом |
+| `ocserv-vps logs` | Смотреть журналы контейнера |
+| `ocserv-vps update-manager [тег]` | Обновить менеджер |
+| `ocserv-vps uninstall [--purge-data]` | Удалить установку |
 
-The installer preserves an existing Docker Engine and adds Docker/Compose only when missing. Bootstrap changes the firewall and can interrupt SSH or VPN sessions, so it requires explicit firewall and restart approval. Uninstall keeps Docker and Let's Encrypt certificates; managed data is also kept unless `--purge-data` is supplied.
+## Веб-панель
 
-## Published images
+Панель позволяет проверить сервер и сертификат, управлять пользователями, видеть активные подключения и завершать выбранные сессии.
 
-- `ghcr.io/khorevaa/ocserv-vps-server:<ocserv-version>`
-- `ghcr.io/khorevaa/ocserv-vps-ui-web:<ui-version>`
-- `ghcr.io/khorevaa/ocserv-vps-ui-control:<ui-version>`
+### Защищённый вход
 
-Only explicit version tags are deployed. The runtime validates image version, source, component, revision, and ocserv compatibility labels before activation.
+![Вход в панель через секрет доступа](docs/images/ui-access.png)
 
-## Repository layout
+### Управление пользователями
 
-- `docker/` — verified ocserv source preparation and container build
-- `ui/web/` — unprivileged Go web/API service and static frontend
-- `ui/control/` — isolated Go control adapter containing `occtl` and `ocpasswd`
-- `scripts/` — transactional VPS lifecycle tasks used by the manager
-- `helpers/` — controller-side SSH Unix-socket tunnel helpers
-- `.github/workflows/` — tests and GHCR publishing workflows
+![Управление пользователями VPN](docs/images/ui-users.png)
 
-## UI access
-
-The UI does not listen on a TCP port. After installation, run this on the VPS to print the exact random local hostname, current access secret, and tunnel command:
+Панель не открывает TCP-порт на VPS. Для доступа выполните:
 
 ```bash
 sudo ocserv-vps ui-access
 ```
 
-The generated tunnel forwards a local port directly to `/run/ocserv-ui-web/web.sock`. The access secret is exchanged for an opaque server-side operator session and is never placed in the URL.
+Команда покажет текущий секрет и готовую команду SSH-туннеля к Unix-сокету `/run/ocserv-ui-web/web.sock`. Секрет обменивается на серверную сессию и не передаётся в URL.
 
-## Build and release
+## Контейнерные образы
 
-Use the manual `Publish ocserv image` workflow with the exact source URL, SHA-256, detached signature, signing key/fingerprint, and base image digest. Use `Publish ocserv UI images` with matching UI/control versions and the compatible ocserv image. Both workflows publish provenance and SBOM attestations.
+- `ghcr.io/khorevaa/ocserv-vps-server:<версия-ocserv>`
+- `ghcr.io/khorevaa/ocserv-vps-ui-web:<версия-ui>`
+- `ghcr.io/khorevaa/ocserv-vps-ui-control:<версия-ui>`
 
-## License
+Перед запуском менеджер проверяет версию, исходный репозиторий, компонент, ревизию и совместимость образов. Серверный образ собирается из опубликованного релиза ocserv с проверкой SHA-256 и GPG-подписи.
 
-Repository automation and UI code are MIT-licensed. Published ocserv images contain upstream ocserv and its source under GPLv2-or-later.
+## Удаление
+
+Обычное удаление сохраняет Docker, сертификаты Let's Encrypt и данные в `/opt/ocserv-vps`:
+
+```bash
+sudo ocserv-vps uninstall
+```
+
+Чтобы также удалить управляемые данные, добавьте `--purge-data`.
+
+## Лицензия
+
+Код панели и автоматизации распространяется по лицензии [MIT](LICENSE). Контейнеры ocserv включают исходный проект ocserv под лицензией GPLv2-or-later.
