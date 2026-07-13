@@ -11,11 +11,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 FROM ${OCSERV_IMAGE} AS ocserv-tools
 
 RUN set -eux; \
-    install -d /runtime/usr/local/bin; \
+    install -d /runtime/usr/local/bin /runtime/usr/local/sbin /runtime/etc; \
     cp /usr/local/bin/occtl /usr/local/bin/ocpasswd /runtime/usr/local/bin/; \
+    cp /usr/local/sbin/ocserv /runtime/usr/local/sbin/; \
+    cp /etc/passwd /etc/group /runtime/etc/; \
     { \
       ldd /usr/local/bin/occtl; \
       ldd /usr/local/bin/ocpasswd; \
+      ldd /usr/local/sbin/ocserv; \
     } | awk '$2 == "=>" && $3 ~ /^\// {print $3} $1 ~ /^\// {print $1}' \
       | sort -u \
       | while IFS= read -r library; do \

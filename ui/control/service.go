@@ -84,6 +84,8 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		"import_users":          {"request_id": true, "action": true, "backup": true, "mode": true},
 		"list_connections":      {"request_id": true, "action": true},
 		"list_journal":          {"request_id": true, "action": true},
+		"read_configuration":    {"request_id": true, "action": true},
+		"write_configuration":   {"request_id": true, "action": true, "content": true, "previous_sha256": true},
 		"disconnect_connection": {"request_id": true, "action": true, "id": true},
 		"restart_service":       {"request_id": true, "action": true},
 		"renew_certificate":     {"request_id": true, "action": true},
@@ -122,6 +124,15 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		return s.listConnections()
 	case "list_journal":
 		return s.listJournal()
+	case "read_configuration":
+		return s.readConfiguration()
+	case "write_configuration":
+		content, contentOK := request["content"].(string)
+		previousSHA256, revisionOK := request["previous_sha256"].(string)
+		if !contentOK || !revisionOK {
+			return nil, controlFailure(422, "invalid_configuration", "The ocserv configuration request is invalid.")
+		}
+		return s.writeConfiguration(content, previousSHA256)
 	case "disconnect_connection":
 		id := safePositiveInt(request["id"])
 		if id == 0 {
@@ -171,6 +182,10 @@ func (s *controlService) createHostTrigger(path, errorCode, errorMessage string)
 		return err
 	}
 	defer lock.Close()
+	return createHostTriggerFile(path, errorCode, errorMessage)
+}
+
+func createHostTriggerFile(path, errorCode, errorMessage string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
 	if errors.Is(err, os.ErrExist) {
 		info, statErr := os.Lstat(path)

@@ -14,6 +14,7 @@ type config struct {
 	AllowedUID       uint32
 	StatePath        string
 	PasswordPath     string
+	ConfigPath       string
 	CertificatePath  string
 	JournalPath      string
 	OCCTLSocket      string
@@ -22,6 +23,7 @@ type config struct {
 	CertRenewTrigger string
 	OCPasswordBin    string
 	OCCTLBin         string
+	OCServBin        string
 	CommandTimeout   time.Duration
 }
 
@@ -31,6 +33,7 @@ func defaultConfig() config {
 		AllowedUID:       10001,
 		StatePath:        "/opt/ocserv-vps/ui-public/state",
 		PasswordPath:     "/opt/ocserv-vps/config/ocpasswd",
+		ConfigPath:       "/opt/ocserv-vps/config/ocserv.conf",
 		CertificatePath:  "/opt/ocserv-vps/ui-public/fullchain.pem",
 		JournalPath:      "/opt/ocserv-vps/logs/vpn-events.jsonl",
 		OCCTLSocket:      "/run/ocserv-control/occtl.sock",
@@ -39,6 +42,7 @@ func defaultConfig() config {
 		CertRenewTrigger: "/run/ocserv-vps-actions/renew-certificate",
 		OCPasswordBin:    "/usr/local/bin/ocpasswd",
 		OCCTLBin:         "/usr/local/bin/occtl",
+		OCServBin:        "/usr/local/sbin/ocserv",
 		CommandTimeout:   8 * time.Second,
 	}
 }
@@ -54,6 +58,7 @@ func configFromEnvironment() (config, error) {
 	cfg.SocketPath = path("OCSERV_UI_CONTROL_SOCKET", cfg.SocketPath)
 	cfg.StatePath = path("OCSERV_UI_STATE_FILE", cfg.StatePath)
 	cfg.PasswordPath = path("OCSERV_UI_OCPASSWD_FILE", cfg.PasswordPath)
+	cfg.ConfigPath = path("OCSERV_UI_CONFIG_FILE", cfg.ConfigPath)
 	cfg.CertificatePath = path("OCSERV_UI_CERTIFICATE_FILE", cfg.CertificatePath)
 	cfg.JournalPath = path("OCSERV_UI_JOURNAL_FILE", cfg.JournalPath)
 	cfg.OCCTLSocket = path("OCSERV_UI_OCCTL_SOCKET", cfg.OCCTLSocket)
@@ -62,6 +67,7 @@ func configFromEnvironment() (config, error) {
 	cfg.CertRenewTrigger = path("OCSERV_UI_CERT_RENEW_TRIGGER", cfg.CertRenewTrigger)
 	cfg.OCPasswordBin = path("OCSERV_UI_OCPASSWD_BIN", cfg.OCPasswordBin)
 	cfg.OCCTLBin = path("OCSERV_UI_OCCTL_BIN", cfg.OCCTLBin)
+	cfg.OCServBin = path("OCSERV_UI_OCSERV_BIN", cfg.OCServBin)
 
 	if value := os.Getenv("OCSERV_UI_ALLOWED_UID"); value != "" {
 		parsed, err := strconv.ParseUint(value, 10, 31)
