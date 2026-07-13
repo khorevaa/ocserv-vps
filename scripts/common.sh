@@ -346,8 +346,8 @@ render_vpn_journal_assets() {
   prepare_vpn_journal_storage
   temporary="$(mktemp "${OCSERV_CONFIG_DIR}/.session-journal.sh.XXXXXX")"
   cat > "${temporary}" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 umask 027
 
 journal=/var/log/ocserv/vpn-events.jsonl
@@ -362,13 +362,25 @@ case "${event}" in
   disconnect) event=disconnected ;;
   *) exit 0 ;;
 esac
-[[ "${username}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$ ]] || exit 0
-[[ "${remote_ip}" =~ ^[0-9A-Fa-f:.]{2,64}$ ]] || exit 0
-[[ "${vpn_ip}" =~ ^[0-9A-Fa-f:.]{2,64}$ ]] || exit 0
+case "${username}" in
+  ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.@-]*) exit 0 ;;
+esac
+case "${remote_ip}" in
+  ''|*[!0-9A-Fa-f:.]*) exit 0 ;;
+esac
+case "${vpn_ip}" in
+  ''|*[!0-9A-Fa-f:.]*) exit 0 ;;
+esac
+[ "${#username}" -le 64 ] || exit 0
+[ "${#remote_ip}" -ge 2 ] && [ "${#remote_ip}" -le 64 ] || exit 0
+[ "${#vpn_ip}" -ge 2 ] && [ "${#vpn_ip}" -le 64 ] || exit 0
 
 number_or_zero() {
-  local value="${1:-0}"
-  [[ "${value}" =~ ^[0-9]{1,20}$ ]] || value=0
+  value="${1:-0}"
+  case "${value}" in
+    ''|*[!0-9]*) value=0 ;;
+  esac
+  [ "${#value}" -le 20 ] || value=0
   printf '%s' "${value}"
 }
 
@@ -378,17 +390,19 @@ bytes_out="$(number_or_zero "${STATS_BYTES_OUT:-0}")"
 occurred_at="$(date -u +%s)"
 
 acquired=0
-for _attempt in {1..20}; do
+attempt=1
+while [ "${attempt}" -le 20 ]; do
   if mkdir "${lock}" 2>/dev/null; then
     acquired=1
     break
   fi
   sleep 0.05
+  attempt=$((attempt + 1))
 done
-[[ "${acquired}" == 1 ]] || exit 0
+[ "${acquired}" = 1 ] || exit 0
 trap 'rmdir "${lock}" 2>/dev/null || true' EXIT
 
-if [[ -f "${journal}" ]] && [[ "$(wc -c < "${journal}")" -gt 4194304 ]]; then
+if [ -f "${journal}" ] && [ "$(wc -c < "${journal}")" -gt 4194304 ]; then
   temporary="${journal}.tmp.$$"
   tail -n 10000 "${journal}" > "${temporary}"
   chmod 0640 "${temporary}"
@@ -551,15 +565,18 @@ health_check_stack() {
 }
 
 require_ui_control_compatibility() {
-  local expected_ocserv_image="$1" control_image configured_ocserv_image
+  local expected_ocserv_image control_image configured_ocserv_image
+  (( $# > 0 )) || die 'At least one compatible ocserv image is required.'
   [[ -f "${OCSERV_UI_COMPOSE_FILE}" && -f "${OCSERV_UI_ENV_FILE}" ]] || return 0
   control_image="$(awk -F= '$1 == "OCSERV_CONTROL_IMAGE" {print substr($0, index($0, "=") + 1)}' "${OCSERV_UI_ENV_FILE}" | tail -n 1)"
   [[ -n "${control_image}" ]] || die 'Managed UI control image is missing from ui.env.'
   docker image inspect "${control_image}" >/dev/null 2>&1 || \
     die "Managed UI control image is not available locally: ${control_image}"
   configured_ocserv_image="$(docker image inspect --format '{{ index .Config.Labels "org.ocserv-vps.ocserv-image" }}' "${control_image}")"
-  [[ "${configured_ocserv_image}" == "${expected_ocserv_image}" ]] || \
-    die "Installed UI control image targets ${configured_ocserv_image:-unknown}, not ${expected_ocserv_image}; publish and install a compatible UI release first."
+  for expected_ocserv_image in "$@"; do
+    [[ "${configured_ocserv_image}" != "${expected_ocserv_image}" ]] || return 0
+  done
+  die "Installed UI control image targets ${configured_ocserv_image:-unknown}, not an image permitted for this lifecycle transition."
 }
 
 health_check_ui_stack() {

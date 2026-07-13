@@ -131,7 +131,7 @@ install_stack() {
   prompt_value domain 'VPN domain' '' OCSERV_DOMAIN
   prompt_value email 'ACME email' '' OCSERV_ACME_EMAIL
   prompt_value username 'Initial VPN username' 'vpnuser' OCSERV_VPN_USERNAME
-  prompt_value version 'ocserv image version' '1.5.0' OCSERV_VERSION
+  prompt_value version 'ocserv image version' '1.5.0-slim' OCSERV_VERSION
   prompt_value vpn_network 'VPN IPv4 network' '10.66.0.0/24' OCSERV_VPN_NETWORK
   prompt_value vpn_port 'VPN TCP/UDP port' '443' OCSERV_VPN_PORT
   prompt_value dns_primary 'Primary DNS' '1.1.1.1' OCSERV_DNS_PRIMARY

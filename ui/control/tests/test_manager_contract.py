@@ -51,6 +51,22 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn("VPN username: %s", self.manager)
         self.assertIn("VPN password: %s", self.manager)
 
+    def test_release_defaults_and_transitions_are_immutable_and_transactional(self) -> None:
+        common = (self.repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        deploy = (self.repository / "scripts" / "deploy-release.sh").read_text(encoding="utf-8")
+        rollback = (self.repository / "scripts" / "rollback-release.sh").read_text(encoding="utf-8")
+        ui_workflow = (self.repository / ".github" / "workflows" / "publish-ui-images.yml").read_text(encoding="utf-8")
+        server_workflow = (self.repository / ".github" / "workflows" / "publish-ocserv-image.yml").read_text(encoding="utf-8")
+
+        self.assertIn("'1.5.0-slim' OCSERV_VERSION", self.manager)
+        self.assertIn("'0.4.12' OCSERV_UI_VERSION", self.manager)
+        self.assertIn('for expected_ocserv_image in "$@"', common)
+        self.assertIn('require_ui_control_compatibility "${NEW_IMAGE}" "${OLD_IMAGE}"', deploy)
+        self.assertIn('require_ui_control_compatibility "${TARGET_IMAGE}" "${OLD_IMAGE}"', rollback)
+        self.assertLess(deploy.index("ensure_vpn_journal_config"), deploy.index('info "Activating ${NEW_IMAGE}'))
+        self.assertIn("Refuse to overwrite an existing version tag", server_workflow)
+        self.assertNotIn("OCSERV_IMAGE}\" == 'ghcr.io/khorevaa/ocserv-vps-server:1.5.0'", ui_workflow)
+
     def test_all_images_point_to_product_repository(self) -> None:
         product_source = "https://github.com/khorevaa/ocserv-vps"
         for relative in (

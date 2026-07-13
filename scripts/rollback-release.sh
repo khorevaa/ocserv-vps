@@ -45,7 +45,7 @@ fi
 [[ "${TARGET_IMAGE}" != "${OLD_IMAGE}" ]] || die "${TARGET_IMAGE} is already active."
 docker image inspect "${TARGET_IMAGE}" >/dev/null 2>&1 || die "Retained image is missing: ${TARGET_IMAGE}"
 test_image_config "${TARGET_IMAGE}"
-require_ui_control_compatibility "${TARGET_IMAGE}"
+require_ui_control_compatibility "${TARGET_IMAGE}" "${OLD_IMAGE}"
 create_stack_backup "rollback-to-${TARGET_VERSION}"
 BACKUP_DIR="${LAST_BACKUP}"
 

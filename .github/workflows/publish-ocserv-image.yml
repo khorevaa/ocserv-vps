@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ocserv_version:
-        description: Exact ocserv version
+        description: Immutable server image version (for example 1.5.0-slim)
         required: true
         type: string
       source_url:
@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       base_image:
-        description: Debian or Ubuntu base image with @sha256 digest
+        description: Alpine builder image with @sha256 digest
         required: true
         type: string
 
@@ -55,8 +55,11 @@ jobs:
         run: |
           set -euo pipefail
           [[ "${VERSION}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
+          [[ "${VERSION}" != 'latest' ]]
           [[ "${SHA256}" =~ ^[0-9A-Fa-f]{64}$ ]]
           [[ "${BASE_IMAGE}" =~ @sha256:[0-9A-Fa-f]{64}$ ]]
+          [[ "${GITHUB_REF}" == 'refs/heads/develop' ]]
+          [[ "${GITHUB_REPOSITORY_OWNER,,}" == 'khorevaa' ]]
 
       - name: Verify and prepare ocserv source
         env:
@@ -66,7 +69,7 @@ jobs:
           SIGNING_KEY_URL: ${{ inputs.signing_key_url }}
           SIGNING_KEY_FINGERPRINT: ${{ inputs.signing_key_fingerprint }}
         run: |
-          docker/prepare-context.sh \
+          bash docker/prepare-context.sh \
             "${SOURCE_URL}" \
             "${SOURCE_SHA256}" \
             "${SIGNATURE_URL}" \
@@ -85,6 +88,22 @@ jobs:
           set -euo pipefail
           docker buildx create --driver docker-container --name ocserv-builder --use
           docker buildx inspect --bootstrap
+
+      - name: Refuse to overwrite an existing version tag
+        env:
+          VERSION: ${{ inputs.ocserv_version }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/${owner}/ocserv-vps-server:${VERSION}"
+          if output="$(docker buildx imagetools inspect "${image}" 2>&1)"; then
+            echo "Refusing to overwrite immutable image ${image}." >&2
+            exit 1
+          fi
+          if ! grep -Eqi 'manifest unknown|not found|does not exist' <<<"${output}"; then
+            printf '%s\n' "${output}" >&2
+            exit 1
+          fi
 
       - name: Build and push version tag
         id: build
