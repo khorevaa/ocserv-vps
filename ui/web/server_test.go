@@ -49,7 +49,7 @@ func startFakeControl(t *testing.T, path string) {
 				var result any
 				switch action {
 				case "overview":
-					result = map[string]any{"service": map[string]any{"status": "running", "active_sessions": 1, "uptime_seconds": 90}, "server": map[string]any{"version": "1.5.0", "image": "ghcr.io/khorevaa/ocserv-vps-server:1.5.0", "domain": "vpn.test", "vpn_network": "10.66.0.0/24", "vpn_port": 443, "openconnect_checked_at": "2026-07-12T10:00:00Z", "updated_at": "2026-07-12T10:00:00Z"}, "certificate": map[string]any{"expires_at": "2026-10-10T00:00:00Z", "days_remaining": 90, "valid": true}, "users_total": 1}
+					result = map[string]any{"service": map[string]any{"status": "running", "active_sessions": 1, "uptime_seconds": 90}, "server": map[string]any{"version": "1.5.0", "image": "ghcr.io/khorevaa/ocserv-vps-server:1.5.0", "domain": "vpn.test", "vpn_network": "10.66.0.0/24", "vpn_port": 443, "openconnect_checked_at": "2026-07-12T10:00:00Z", "updated_at": "2026-07-12T10:00:00Z"}, "certificate": map[string]any{"expires_at": "2026-10-10T00:00:00Z", "days_remaining": 90, "issuer": "Let's Encrypt (R10)", "valid": true}, "users_total": 1}
 				case "list_users":
 					result = map[string]any{"users": []any{map[string]any{"username": "vpn_user", "active_sessions": 1}}, "total": 1}
 				case "list_connections":
@@ -60,10 +60,19 @@ func startFakeControl(t *testing.T, path string) {
 					result = map[string]any{"id": request["id"], "disconnected": true}
 				case "restart_service":
 					result = map[string]any{"restarting": true}
+				case "renew_certificate":
+					result = map[string]any{"renewal_requested": true}
 				case "add_user":
-					result = map[string]any{"username": request["username"], "password": "Generated!Pass1"}
+					result = map[string]any{"username": request["username"], "password": "Generated!Pass1", "connection": testConnectionProfile(request["username"], "Generated!Pass1")}
 				case "rotate_password":
-					result = map[string]any{"username": request["username"], "password": "Generated!Pass2", "sessions_terminated": request["terminate_sessions"]}
+					result = map[string]any{"username": request["username"], "password": "Generated!Pass2", "connection": testConnectionProfile(request["username"], "Generated!Pass2"), "sessions_terminated": request["terminate_sessions"]}
+				case "export_users":
+					result = map[string]any{
+						"format": "ocserv-vps-users", "version": 1, "exported_at": "2026-07-13T12:00:00Z",
+						"users": []any{map[string]any{"username": "vpn_user", "group": "*", "password_hash": "$6$test$private-hash"}},
+					}
+				case "import_users":
+					result = map[string]any{"mode": request["mode"], "imported": 1, "created": 1, "updated": 0, "unchanged": 0, "removed": 0, "total": 2, "sessions_terminated": true}
 				default:
 					return
 				}
@@ -71,6 +80,16 @@ func startFakeControl(t *testing.T, path string) {
 			}()
 		}
 	}()
+}
+
+func testConnectionProfile(username any, password string) map[string]any {
+	name, _ := username.(string)
+	server := "https://vpn.test:443/"
+	return map[string]any{
+		"server": server, "host": "vpn.test", "port": 443, "protocol": "anyconnect",
+		"username": name, "password": password,
+		"text": "server=" + server + "\nprotocol=anyconnect\nusername=" + name + "\npassword=" + password + "\n",
+	}
 }
 
 func testApplication(t *testing.T, accessSecret string) (*application, config) {
@@ -82,7 +101,7 @@ func testApplication(t *testing.T, accessSecret string) (*application, config) {
 	writeTestSecret(t, sessionKey, "test-session-key-with-at-least-32-bytes!")
 	writeTestSecret(t, access, accessSecret)
 	startFakeControl(t, control)
-	cfg := config{DataFile: filepath.Join(root, "state.json"), ControlSocket: control, WebSocket: filepath.Join(root, "web.sock"), SessionKeyFile: sessionKey, AccessSecretFile: access, UIImage: "ghcr.io/khorevaa/ocserv-vps-ui-web:0.4.5", VPNDomain: "vpn.test", AllowedOrigin: testOrigin, AllowedHost: strings.TrimPrefix(testOrigin, "http://"), SessionTTLSeconds: 3600, AuditRetentionSeconds: 3600, AuditMaxRows: 20, ControlTimeoutSeconds: 1, MaxRequestBytes: 16384, RequireRootSecrets: false}
+	cfg := config{DataFile: filepath.Join(root, "state.json"), ControlSocket: control, WebSocket: "/run/ocserv-ui-web/web.sock", SessionKeyFile: sessionKey, AccessSecretFile: access, UIImage: "ghcr.io/khorevaa/ocserv-vps-ui-web:0.4.5", VPNDomain: "vpn.test", AllowedOrigin: testOrigin, AllowedHost: strings.TrimPrefix(testOrigin, "http://"), UILocalPort: 8765, SSHPort: 2222, SessionTTLSeconds: 3600, AuditRetentionSeconds: 3600, AuditMaxRows: 20, ControlTimeoutSeconds: 1, MaxRequestBytes: 16384, RequireRootSecrets: false}
 	app, err := newApplication(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +193,7 @@ func TestSecretOnlyFlowAndEmbeddedUI(t *testing.T) {
 		t.Fatalf("csrf denial=%d", denied.Code)
 	}
 	created := perform(app, "POST", "/api/v1/users", `{"username":"alice"}`, cookies[0], csrf)
-	if created.Code != 201 || !strings.Contains(created.Body.String(), "Generated!Pass1") {
+	if created.Code != 201 || !strings.Contains(created.Body.String(), "Generated!Pass1") || !strings.Contains(created.Body.String(), `"protocol":"anyconnect"`) {
 		t.Fatalf("create=%d %s", created.Code, created.Body.String())
 	}
 	stateData, err := os.ReadFile(app.store.path)
@@ -185,6 +204,38 @@ func TestSecretOnlyFlowAndEmbeddedUI(t *testing.T) {
 		if strings.Contains(string(stateData), forbidden) {
 			t.Fatalf("secret leaked to JSON state")
 		}
+	}
+}
+
+func TestUserBackupExportAndImportRequireCSRFWithoutPersistingHashes(t *testing.T) {
+	app, _ := testApplication(t, strings.Repeat("A", 64))
+	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+strings.Repeat("A", 64)+`"}`, nil, "")
+	cookie := access.Result().Cookies()[0]
+	csrf, _ := decodeBody(t, access)["csrf_token"].(string)
+
+	if response := perform(app, "POST", "/api/v1/users/export", `{}`, cookie, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("export without CSRF=%d", response.Code)
+	}
+	exported := perform(app, "POST", "/api/v1/users/export", `{}`, cookie, csrf)
+	if exported.Code != http.StatusOK || !strings.Contains(exported.Header().Get("Content-Disposition"), "ocserv-vps-users.json") || !strings.Contains(exported.Body.String(), "private-hash") {
+		t.Fatalf("export=%d %s", exported.Code, exported.Body.String())
+	}
+
+	requestBody := `{"mode":"merge","backup":` + exported.Body.String() + `}`
+	if response := perform(app, "POST", "/api/v1/users/import", requestBody, cookie, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("import without CSRF=%d", response.Code)
+	}
+	imported := perform(app, "POST", "/api/v1/users/import", requestBody, cookie, csrf)
+	if imported.Code != http.StatusOK || !strings.Contains(imported.Body.String(), `"created":1`) {
+		t.Fatalf("import=%d %s", imported.Code, imported.Body.String())
+	}
+
+	stateData, err := os.ReadFile(app.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stateData), "private-hash") {
+		t.Fatal("password hash leaked to persistent web state")
 	}
 }
 
@@ -252,8 +303,30 @@ func TestUIInfoMasksAccessSecret(t *testing.T) {
 	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+strings.Repeat("A", 64)+`"}`, nil, "")
 	cookie := access.Result().Cookies()[0]
 	response := perform(app, "GET", "/api/v1/ui", "", cookie, "")
-	if response.Code != 200 || !strings.Contains(response.Body.String(), "ocserv-vps-ui-web:0.4.5") || strings.Contains(response.Body.String(), strings.Repeat("A", 64)) {
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "ocserv-vps-ui-web:0.4.5") || !strings.Contains(response.Body.String(), `ssh -p 2222 -N -T -L localhost:8765:/run/ocserv-ui-web/web.sock root@vpn.test`) || strings.Contains(response.Body.String(), strings.Repeat("A", 64)) {
 		t.Fatalf("ui info=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAccessSecretCopyRequiresCSRFAndIsNotPersisted(t *testing.T) {
+	secret := strings.Repeat("A", 64)
+	app, _ := testApplication(t, secret)
+	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+secret+`"}`, nil, "")
+	cookie := access.Result().Cookies()[0]
+	csrf, _ := decodeBody(t, access)["csrf_token"].(string)
+	if response := perform(app, "POST", "/api/v1/ui/access-secret", `{}`, cookie, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("secret copy without CSRF=%d", response.Code)
+	}
+	response := perform(app, "POST", "/api/v1/ui/access-secret", `{}`, cookie, csrf)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), secret) {
+		t.Fatalf("secret copy=%d %s", response.Code, response.Body.String())
+	}
+	stateData, err := os.ReadFile(app.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stateData), secret) {
+		t.Fatal("UI access secret leaked to persistent state")
 	}
 }
 
@@ -268,5 +341,12 @@ func TestRestartRequiresCSRF(t *testing.T) {
 	response := perform(app, "POST", "/api/v1/service/restart", `{}`, cookie, csrf)
 	if response.Code != 200 || !strings.Contains(response.Body.String(), `"restarting":true`) {
 		t.Fatalf("restart=%d %s", response.Code, response.Body.String())
+	}
+	if response := perform(app, "POST", "/api/v1/certificate/renew", `{}`, cookie, ""); response.Code != 403 {
+		t.Fatalf("certificate renewal without CSRF=%d", response.Code)
+	}
+	response = perform(app, "POST", "/api/v1/certificate/renew", `{}`, cookie, csrf)
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"renewal_requested":true`) {
+		t.Fatalf("certificate renewal=%d %s", response.Code, response.Body.String())
 	}
 }

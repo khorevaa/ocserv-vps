@@ -19,7 +19,7 @@ validate_version "${UI_VERSION}"; validate_registry_image "${UI_IMAGE}"; validat
 for path in "${OCSERV_STATE_FILE}" "${OCSERV_ENV_FILE}" "${OCSERV_COMPOSE_FILE}" "${OCSERV_UI_ENV_FILE}" "${OCSERV_UI_COMPOSE_FILE}"; do
   [[ -f "${path}" && ! -L "${path}" ]] || die "Managed file is missing or unsafe: ${path}"
 done
-for command in awk curl docker flock openssl stat systemctl systemd-tmpfiles; do require_command "${command}"; done
+for command in awk certbot curl docker flock openssl stat systemctl systemd-tmpfiles; do require_command "${command}"; done
 acquire_stack_locks
 CURRENT_IMAGE="$(state_get current_image)"; VPN_PORT="$(state_get vpn_port)"; DOMAIN="$(state_get domain)"
 [[ -n "${CURRENT_IMAGE}" && -n "${VPN_PORT}" && -n "${DOMAIN}" ]] || die 'Managed VPN state is incomplete.'
@@ -86,6 +86,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       OCSERV_UI_ALLOWED_UID: "10001"
+      OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}
       OCSERV_UI_CERTIFICATE_FILE: /opt/ocserv-vps/ui-public/fullchain.pem
       OCSERV_UI_STATE_FILE: /opt/ocserv-vps/ui-public/state
       OCSERV_UI_JOURNAL_FILE: /opt/ocserv-vps/logs/vpn-events.jsonl
@@ -116,6 +117,7 @@ services:
       OCSERV_UI_ALLOWED_ORIGIN: "http://${UI_LOCAL_HOST}:${UI_PORT}"
       OCSERV_UI_IMAGE_NAME: "${UI_IMAGE}"
       OCSERV_UI_VPN_DOMAIN: "${DOMAIN}"
+      OCSERV_UI_SSH_PORT: "${SSH_PORT}"
       OCSERV_UI_TRUSTED_PROXY_CIDRS: ""
       OCSERV_UI_JSON: /var/lib/ocserv-ui/state.json
       OCSERV_UI_CONTROL_SOCKET: /run/ocserv-ui/control.sock
@@ -142,6 +144,7 @@ volumes:
 EOF
 chmod 0640 "${OCSERV_UI_COMPOSE_FILE}"
 install_ocserv_restart_bridge
+install_certificate_renewal_bridge
 render_ui_access_info_script
 compose up -d --remove-orphans
 health_check_stack "${CURRENT_IMAGE}" "${VPN_PORT}" 60 || die 'VPN health failed after UI upgrade.'

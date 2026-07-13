@@ -84,6 +84,8 @@ Run `sudo ocserv-vps` without arguments to open the interactive menu.
 
 The panel displays server and certificate health, manages users, lists active connections, and can terminate selected sessions.
 
+The status page can copy the VPN domain, the ready-to-use SSH command for the private panel, and the access secret. The TLS card shows the certificate issuer and can request forced renewal through Let's Encrypt. Renewal runs through an isolated host-level systemd bridge, so the panel containers remain without network or Docker socket access.
+
 ### Protected access
 
 ![Accessing the panel with an access secret](docs/images/ui-access.png)
@@ -91,6 +93,10 @@ The panel displays server and certificate health, manages users, lists active co
 ### User management
 
 ![Managing VPN users](docs/images/ui-users.png)
+
+After creating a user or rotating a password, the panel displays a one-time text connection profile with the server address, AnyConnect protocol, username, and password. It can be copied or downloaded as a `.txt` file for a phone or router. The panel does not persist the plaintext password.
+
+The Export and Import actions move users between installations without changing their passwords. Import merges with the existing list by default; full replacement must be enabled explicitly and removes users absent from the file. The exported JSON contains password hashes and must be handled as a sensitive backup.
 
 The panel does not expose a TCP port on the VPS. To connect, run:
 
@@ -116,7 +122,7 @@ The default uninstall keeps Docker, Let's Encrypt certificates, and data under `
 sudo ocserv-vps uninstall
 ```
 
-Add `--purge-data` to remove managed data as well.
+Add `--purge-data` to remove managed data and backups from `/var/backups/ocserv-vps` as well.
 
 ## License
 

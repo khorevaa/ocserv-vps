@@ -39,7 +39,6 @@ VPN_PORT="$(state_get vpn_port)"
 
 pull_verified_image "${IMAGE}" "${VERSION}"
 NEW_IMAGE="${RESOLVED_IMAGE}"
-test_image_config "${NEW_IMAGE}"
 require_ui_control_compatibility "${NEW_IMAGE}" "${OLD_IMAGE}"
 create_stack_backup "deploy-${VERSION}"
 BACKUP_DIR="${LAST_BACKUP}"
@@ -97,9 +96,10 @@ on_exit() {
 trap on_exit EXIT
 trap 'exit 130' HUP INT TERM
 
-# Manager 0.1.1 rendered a Bash-only journal hook. Refresh it transactionally
-# before activating the scratch runtime, which intentionally ships only POSIX sh.
+# Refresh the managed configuration transactionally: migrate current ocserv
+# directives and replace the old Bash-only journal hook with its POSIX version.
 ensure_vpn_journal_config
+test_image_config "${NEW_IMAGE}"
 
 info "Activating ${NEW_IMAGE}; active VPN sessions will disconnect."
 write_stack_env "${NEW_IMAGE}"

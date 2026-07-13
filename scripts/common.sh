@@ -18,6 +18,12 @@ OCSERV_UI_RESTART_TRIGGER="${OCSERV_UI_ACTION_DIR}/restart-ocserv"
 OCSERV_UI_ACTION_TMPFILES_FILE="/etc/tmpfiles.d/ocserv-vps-actions.conf"
 OCSERV_UI_RESTART_PATH_UNIT="/etc/systemd/system/ocserv-vps-restart.path"
 OCSERV_UI_RESTART_SERVICE_UNIT="/etc/systemd/system/ocserv-vps-restart.service"
+OCSERV_UI_CERT_RENEW_TRIGGER="${OCSERV_UI_ACTION_DIR}/renew-certificate"
+OCSERV_UI_CERT_RENEW_PATH_UNIT="/etc/systemd/system/ocserv-vps-certificate-renew.path"
+OCSERV_UI_CERT_RENEW_SERVICE_UNIT="/etc/systemd/system/ocserv-vps-certificate-renew.service"
+OCSERV_UI_CERT_RENEW_SCRIPT="/usr/local/sbin/ocserv-vps-renew-certificate"
+OCSERV_UI_CERT_SYNC_SCRIPT="/usr/local/sbin/ocserv-vps-sync-certificate"
+OCSERV_UI_CERT_DEPLOY_HOOK="/etc/letsencrypt/renewal-hooks/deploy/ocserv-vps-ui-sync.sh"
 OCSERV_UI_ACCESS_INFO_SCRIPT="/usr/local/sbin/ocserv-ui-access-info"
 OCSERV_UI_HOST_USER="ocserv-ui-host"
 OCSERV_UI_HOST_GROUP="ocserv-ui-host"
@@ -97,6 +103,132 @@ EOF
   systemctl daemon-reload
   systemctl enable --now ocserv-vps-restart.path >/dev/null
   systemctl is-active --quiet ocserv-vps-restart.path || die 'The ocserv restart path unit is not active.'
+}
+
+install_certificate_renewal_bridge() {
+  local awk_bin certbot_bin cmp_bin docker_bin install_bin mktemp_bin mv_bin
+  local sync_temp renew_temp hook_temp service_temp path_temp
+  awk_bin="$(command -v awk)"
+  certbot_bin="$(command -v certbot)"
+  cmp_bin="$(command -v cmp)"
+  docker_bin="$(command -v docker)"
+  install_bin="$(command -v install)"
+  mktemp_bin="$(command -v mktemp)"
+  mv_bin="$(command -v mv)"
+  for executable in "${awk_bin}" "${certbot_bin}" "${cmp_bin}" "${docker_bin}" "${install_bin}" "${mktemp_bin}" "${mv_bin}"; do
+    [[ "${executable}" == /* && "${executable}" != *[[:space:]]* ]] || die 'Unsafe certificate renewal executable path.'
+  done
+  [[ -d "${OCSERV_UI_ACTION_DIR}" && ! -L "${OCSERV_UI_ACTION_DIR}" ]] || die 'Unsafe ocserv action directory.'
+  [[ -d "${OCSERV_UI_PUBLIC_DIR}" && ! -L "${OCSERV_UI_PUBLIC_DIR}" ]] || die 'Unsafe UI certificate directory.'
+  rm -f "${OCSERV_UI_CERT_RENEW_TRIGGER}"
+
+  sync_temp="$(mktemp /usr/local/sbin/.ocserv-vps-sync-certificate.XXXXXX)"
+  cat > "${sync_temp}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+umask 027
+state_file='${OCSERV_STATE_FILE}'
+public_dir='${OCSERV_UI_PUBLIC_DIR}'
+container='${OCSERV_CONTAINER}'
+[[ -f "\${state_file}" && ! -L "\${state_file}" ]] || { printf '%s\n' 'Managed state is missing or unsafe.' >&2; exit 1; }
+[[ -d "\${public_dir}" && ! -L "\${public_dir}" ]] || { printf '%s\n' 'UI certificate directory is missing or unsafe.' >&2; exit 1; }
+count="\$(${awk_bin} -F= '\$1 == "domain" {count++} END {print count+0}' "\${state_file}")"
+[[ "\${count}" == 1 ]] || { printf '%s\n' 'Managed domain is missing or duplicated.' >&2; exit 1; }
+domain="\$(${awk_bin} -F= '\$1 == "domain" {print substr(\$0, index(\$0, "=") + 1)}' "\${state_file}")"
+[[ "\${domain}" == "\${domain,,}" && "\${domain}" =~ ^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\$ && "\${domain}" == *.* ]] || {
+  printf '%s\n' 'Managed certificate domain is unsafe.' >&2; exit 1;
+}
+source_file="/etc/letsencrypt/live/\${domain}/fullchain.pem"
+[[ -f "\${source_file}" ]] || { printf '%s\n' 'Renewed certificate is missing.' >&2; exit 1; }
+target_file="\${public_dir}/fullchain.pem"
+if [[ -f "\${target_file}" && ! -L "\${target_file}" ]] && ${cmp_bin} --silent "\${source_file}" "\${target_file}"; then
+  exit 0
+fi
+temporary="\$(${mktemp_bin} "\${public_dir}/.fullchain.pem.XXXXXX")"
+trap 'status=\$?; rm -f -- "\${temporary}"; exit "\${status}"' EXIT HUP INT TERM
+${install_bin} -m 0644 "\${source_file}" "\${temporary}"
+${mv_bin} -T "\${temporary}" "\${target_file}"
+temporary=''
+trap - EXIT HUP INT TERM
+if ${docker_bin} inspect "\${container}" >/dev/null 2>&1; then
+  ${docker_bin} kill --signal HUP "\${container}" >/dev/null || ${docker_bin} restart "\${container}" >/dev/null
+fi
+EOF
+  chmod 0750 "${sync_temp}"
+  chown root:root "${sync_temp}"
+  mv -T "${sync_temp}" "${OCSERV_UI_CERT_SYNC_SCRIPT}"
+
+  renew_temp="$(mktemp /usr/local/sbin/.ocserv-vps-renew-certificate.XXXXXX)"
+  cat > "${renew_temp}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+umask 027
+state_file='${OCSERV_STATE_FILE}'
+[[ -f "\${state_file}" && ! -L "\${state_file}" ]] || { printf '%s\n' 'Managed state is missing or unsafe.' >&2; exit 1; }
+count="\$(${awk_bin} -F= '\$1 == "domain" {count++} END {print count+0}' "\${state_file}")"
+[[ "\${count}" == 1 ]] || { printf '%s\n' 'Managed domain is missing or duplicated.' >&2; exit 1; }
+domain="\$(${awk_bin} -F= '\$1 == "domain" {print substr(\$0, index(\$0, "=") + 1)}' "\${state_file}")"
+[[ "\${domain}" == "\${domain,,}" && "\${domain}" =~ ^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\$ && "\${domain}" == *.* ]] || {
+  printf '%s\n' 'Managed certificate domain is unsafe.' >&2; exit 1;
+}
+${certbot_bin} renew --cert-name "\${domain}" --force-renewal --non-interactive --no-random-sleep-on-renew
+'${OCSERV_UI_CERT_SYNC_SCRIPT}'
+EOF
+  chmod 0750 "${renew_temp}"
+  chown root:root "${renew_temp}"
+  mv -T "${renew_temp}" "${OCSERV_UI_CERT_RENEW_SCRIPT}"
+
+  install -d -m 0755 "$(dirname "${OCSERV_UI_CERT_DEPLOY_HOOK}")"
+  hook_temp="$(mktemp "$(dirname "${OCSERV_UI_CERT_DEPLOY_HOOK}")/.ocserv-vps-ui-sync.XXXXXX")"
+  cat > "${hook_temp}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+exec '${OCSERV_UI_CERT_SYNC_SCRIPT}'
+EOF
+  chmod 0750 "${hook_temp}"
+  chown root:root "${hook_temp}"
+  mv -T "${hook_temp}" "${OCSERV_UI_CERT_DEPLOY_HOOK}"
+
+  service_temp="$(mktemp /etc/systemd/system/.ocserv-vps-certificate-renew.service.XXXXXX)"
+  cat > "${service_temp}" <<EOF
+[Unit]
+Description=Renew the managed ocserv TLS certificate after an authenticated UI request
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/rm -f ${OCSERV_UI_CERT_RENEW_TRIGGER}
+ExecStart=${OCSERV_UI_CERT_RENEW_SCRIPT}
+TimeoutStartSec=180
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=${OCSERV_UI_ACTION_DIR} ${OCSERV_UI_PUBLIC_DIR} /etc/letsencrypt -/var/lib/letsencrypt -/var/log/letsencrypt -/var/www/ocserv-acme
+EOF
+  chmod 0644 "${service_temp}"
+  mv -T "${service_temp}" "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}"
+
+  path_temp="$(mktemp /etc/systemd/system/.ocserv-vps-certificate-renew.path.XXXXXX)"
+  cat > "${path_temp}" <<EOF
+[Unit]
+Description=Watch for authenticated ocserv certificate renewal requests
+
+[Path]
+PathExists=${OCSERV_UI_CERT_RENEW_TRIGGER}
+Unit=ocserv-vps-certificate-renew.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 "${path_temp}"
+  mv -T "${path_temp}" "${OCSERV_UI_CERT_RENEW_PATH_UNIT}"
+
+  systemctl daemon-reload
+  systemctl enable --now ocserv-vps-certificate-renew.path >/dev/null
+  systemctl is-active --quiet ocserv-vps-certificate-renew.path || die 'The certificate renewal path unit is not active.'
 }
 
 ui_host_identity_is_absent() {
@@ -420,6 +552,7 @@ EOF
 
 ensure_vpn_journal_config() {
   local directive desired
+  modernize_ocserv_config
   render_vpn_journal_assets
   for directive in connect-script disconnect-script; do
     desired="${directive} = /etc/ocserv/session-journal.sh"
@@ -430,6 +563,24 @@ ensure_vpn_journal_config() {
     fi
   done
   chmod 0640 "${OCSERV_CONFIG_DIR}/ocserv.conf"
+}
+
+modernize_ocserv_config() {
+  local config="${OCSERV_CONFIG_DIR}/ocserv.conf"
+  [[ -f "${config}" && ! -L "${config}" ]] || die 'The managed ocserv configuration is missing or unsafe.'
+
+  # Compression is disabled by default in ocserv 1.5.0. Remove the old
+  # explicit false value, but preserve an intentional custom true value.
+  sed -i -E '/^[[:space:]]*compression[[:space:]]*=[[:space:]]*false([[:space:]]*(#.*)?)?$/d' "${config}"
+
+  if grep -q '^[[:space:]]*min-reauth-time[[:space:]]*=' "${config}"; then
+    if grep -q '^[[:space:]]*ban-time[[:space:]]*=' "${config}"; then
+      sed -i -E '/^[[:space:]]*min-reauth-time[[:space:]]*=/d' "${config}"
+    else
+      sed -i -E 's/^[[:space:]]*min-reauth-time([[:space:]]*=)/ban-time\1/' "${config}"
+    fi
+  fi
+  chmod 0640 "${config}"
 }
 
 install_docker_engine() {
@@ -628,9 +779,8 @@ keepalive = 300
 dpd = 60
 mobile-dpd = 300
 try-mtu-discovery = true
-compression = false
 auth-timeout = 240
-min-reauth-time = 300
+ban-time = 300
 max-ban-score = 80
 ban-reset-time = 300
 cookie-timeout = 86400

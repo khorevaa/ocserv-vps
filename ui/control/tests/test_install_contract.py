@@ -37,6 +37,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertNotIn("SYS_ADMIN", control_block)
         self.assertNotIn("docker.sock", control_block)
         self.assertIn("OCSERV_UI_JOURNAL_FILE: /opt/ocserv-vps/logs/vpn-events.jsonl", control_block)
+        self.assertIn("OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}", control_block)
         self.assertIn("- ./logs:/opt/ocserv-vps/logs:ro", control_block)
         self.assertIn("source: ${OCSERV_UI_ACTION_DIR}", control_block)
         self.assertIn("target: ${OCSERV_UI_ACTION_DIR}", control_block)
@@ -82,6 +83,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("OCSERV_UI_LOCAL_PORT=${UI_PORT}", installer)
         self.assertIn("OCSERV_UI_VPN_DOMAIN=${DOMAIN}", installer)
         self.assertIn('OCSERV_UI_VPN_DOMAIN: "${DOMAIN}"', web_block)
+        self.assertIn('OCSERV_UI_SSH_PORT: "${SSH_PORT}"', web_block)
         self.assertEqual(
             installer.count("url=http://${UI_LOCAL_HOST}:${UI_PORT}"), 1
         )
@@ -119,11 +121,43 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn('s.runOCCTL("disconnect", "id", strconv.Itoa(id))', control)
         self.assertIn('path == "/api/v1/journal"', web)
         self.assertIn('path == "/api/v1/connections"', web)
-        self.assertIn("os.OpenFile(s.config.RestartTrigger", control)
+        self.assertIn("s.createHostTrigger(s.config.RestartTrigger", control)
+        self.assertIn("os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL", control)
         self.assertNotIn('runOCCTL("stop", "now")', control)
         self.assertIn("install_ocserv_restart_bridge()", common)
         self.assertIn("PathExists=${OCSERV_UI_RESTART_TRIGGER}", common)
         self.assertIn("ExecStart=${docker_bin} restart --timeout 10 ${OCSERV_CONTAINER}", common)
+
+    def test_certificate_renewal_uses_a_fixed_host_bridge(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        installer = (repository / "scripts" / "install-ui.sh").read_text(encoding="utf-8")
+        upgrader = (repository / "scripts" / "upgrade-ui.sh").read_text(encoding="utf-8")
+        uninstaller = (repository / "scripts" / "uninstall.sh").read_text(encoding="utf-8")
+        status = (repository / "scripts" / "ui-status.sh").read_text(encoding="utf-8")
+        control = (repository / "ui" / "control" / "service.go").read_text(encoding="utf-8")
+        web = (repository / "ui" / "web" / "server.go").read_text(encoding="utf-8")
+
+        for contract in (
+            'OCSERV_UI_CERT_RENEW_TRIGGER="${OCSERV_UI_ACTION_DIR}/renew-certificate"',
+            "install_certificate_renewal_bridge()",
+            "PathExists=${OCSERV_UI_CERT_RENEW_TRIGGER}",
+            "ExecStart=${OCSERV_UI_CERT_RENEW_SCRIPT}",
+            '${certbot_bin} renew --cert-name "\\${domain}" --force-renewal --non-interactive',
+            'source_file="/etc/letsencrypt/live/\\${domain}/fullchain.pem"',
+            'mv -T "${hook_temp}" "${OCSERV_UI_CERT_DEPLOY_HOOK}"',
+        ):
+            self.assertIn(contract, common)
+        self.assertIn("install_certificate_renewal_bridge", installer)
+        self.assertIn("install_certificate_renewal_bridge", upgrader)
+        self.assertIn('"${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}"', uninstaller)
+        self.assertIn('"${OCSERV_UI_CERT_DEPLOY_HOOK}"', uninstaller)
+        self.assertIn("ocserv-vps-certificate-renew.path", status)
+        self.assertIn('"${OCSERV_UI_CERT_SYNC_SCRIPT}"', status)
+        self.assertIn('"renew_certificate"', control)
+        self.assertIn("s.config.CertRenewTrigger", control)
+        self.assertIn('path == "/api/v1/certificate/renew"', web)
+        self.assertNotIn("/etc/letsencrypt", installer.split("  ocserv-control:\n", 1)[1].split("\n  ocserv-ui:\n", 1)[0])
 
     def test_ui_upgrade_is_transactional_and_preserves_access(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
@@ -145,6 +179,41 @@ class InstallComposeContractTests(unittest.TestCase):
         app = (repository / "ui" / "web" / "app" / "static" / "app.js").read_text(encoding="utf-8")
         for call in ("loadOverview(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)"):
             self.assertIn(call, app)
+
+    def test_user_backup_and_one_time_connection_profile_are_exposed_safely(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        static = repository / "ui" / "web" / "app" / "static"
+        index = (static / "index.html").read_text(encoding="utf-8")
+        app = (static / "app.js").read_text(encoding="utf-8")
+        web = (repository / "ui" / "web" / "server.go").read_text(encoding="utf-8")
+        control = (repository / "ui" / "control" / "service.go").read_text(encoding="utf-8")
+
+        for element_id in (
+            'id="export-users-button"',
+            'id="import-users-button"',
+            'id="credential-config"',
+            'id="copy-config-button"',
+            'id="download-config-button"',
+            'id="copy-domain-button"',
+            'id="certificate-issuer"',
+            'id="renew-certificate-button"',
+            'id="ui-ssh-command"',
+            'id="copy-ssh-command-button"',
+            'id="copy-ui-secret-button"',
+        ):
+            self.assertIn(element_id, index)
+        self.assertIn("Экспорт содержит хеши паролей", index)
+        self.assertIn('apiRequest("/api/v1/users/export"', app)
+        self.assertIn('apiRequest("/api/v1/users/import"', app)
+        self.assertIn("credential.connection", app)
+        self.assertIn("connection.text", app)
+        self.assertEqual(app.count("localStorage.setItem"), 1)
+        self.assertIn('localStorage.setItem("ocserv-ui-theme"', app)
+        self.assertIn('path == "/api/v1/users/export"', web)
+        self.assertIn('path == "/api/v1/users/import"', web)
+        self.assertIn('path == "/api/v1/ui/access-secret"', web)
+        self.assertIn('"password_hash"', control)
+        self.assertIn('"connection": connection', control)
 
     def test_installer_reserves_and_validates_host_identity_transactionally(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
@@ -276,9 +345,27 @@ class InstallComposeContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("[[ \"${PURGE_DATA}\" == 1 ]]", uninstaller)
+        self.assertIn('"${OCSERV_BACKUP_ROOT}"', uninstaller)
+        self.assertNotIn("before-uninstall.tar.gz", uninstaller)
         self.assertIn("/root/ocserv-vps-ui-access", uninstaller)
         self.assertIn("/root/ocserv-vps-initial-credentials", uninstaller)
         self.assertIn("/root/ocserv-vps-user-*", uninstaller)
+
+    def test_ocserv_config_uses_current_1_5_directives(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        deployer = (repository / "scripts" / "deploy-release.sh").read_text(encoding="utf-8")
+        rendered = common.split("render_ocserv_config() {", 1)[1].split("create_password_user() {", 1)[0]
+        self.assertIn("ban-time = 300", rendered)
+        self.assertNotIn("min-reauth-time", rendered)
+        self.assertNotIn("compression =", rendered)
+        self.assertIn("modernize_ocserv_config()", common)
+        self.assertIn("modernize_ocserv_config\n", common)
+        self.assertIn("preserve an intentional custom true value", common)
+        self.assertLess(
+            deployer.index("ensure_vpn_journal_config"),
+            deployer.index('test_image_config "${NEW_IMAGE}"'),
+        )
 
     def test_bootstrap_prints_generated_initial_vpn_credentials(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]

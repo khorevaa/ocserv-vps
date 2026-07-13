@@ -10,34 +10,36 @@ import (
 )
 
 type config struct {
-	SocketPath      string
-	AllowedUID      uint32
-	StatePath       string
-	PasswordPath    string
-	CertificatePath string
-	JournalPath     string
-	OCCTLSocket     string
-	OperationLock   string
-	RestartTrigger  string
-	OCPasswordBin   string
-	OCCTLBin        string
-	CommandTimeout  time.Duration
+	SocketPath       string
+	AllowedUID       uint32
+	StatePath        string
+	PasswordPath     string
+	CertificatePath  string
+	JournalPath      string
+	OCCTLSocket      string
+	OperationLock    string
+	RestartTrigger   string
+	CertRenewTrigger string
+	OCPasswordBin    string
+	OCCTLBin         string
+	CommandTimeout   time.Duration
 }
 
 func defaultConfig() config {
 	return config{
-		SocketPath:      "/run/ocserv-ui/control.sock",
-		AllowedUID:      10001,
-		StatePath:       "/opt/ocserv-vps/ui-public/state",
-		PasswordPath:    "/opt/ocserv-vps/config/ocpasswd",
-		CertificatePath: "/opt/ocserv-vps/ui-public/fullchain.pem",
-		JournalPath:     "/opt/ocserv-vps/logs/vpn-events.jsonl",
-		OCCTLSocket:     "/run/ocserv-control/occtl.sock",
-		OperationLock:   "/opt/ocserv-vps/locks/operation.lock",
-		RestartTrigger:  "/run/ocserv-vps-actions/restart-ocserv",
-		OCPasswordBin:   "/usr/local/bin/ocpasswd",
-		OCCTLBin:        "/usr/local/bin/occtl",
-		CommandTimeout:  8 * time.Second,
+		SocketPath:       "/run/ocserv-ui/control.sock",
+		AllowedUID:       10001,
+		StatePath:        "/opt/ocserv-vps/ui-public/state",
+		PasswordPath:     "/opt/ocserv-vps/config/ocpasswd",
+		CertificatePath:  "/opt/ocserv-vps/ui-public/fullchain.pem",
+		JournalPath:      "/opt/ocserv-vps/logs/vpn-events.jsonl",
+		OCCTLSocket:      "/run/ocserv-control/occtl.sock",
+		OperationLock:    "/opt/ocserv-vps/locks/operation.lock",
+		RestartTrigger:   "/run/ocserv-vps-actions/restart-ocserv",
+		CertRenewTrigger: "/run/ocserv-vps-actions/renew-certificate",
+		OCPasswordBin:    "/usr/local/bin/ocpasswd",
+		OCCTLBin:         "/usr/local/bin/occtl",
+		CommandTimeout:   8 * time.Second,
 	}
 }
 
@@ -56,6 +58,8 @@ func configFromEnvironment() (config, error) {
 	cfg.JournalPath = path("OCSERV_UI_JOURNAL_FILE", cfg.JournalPath)
 	cfg.OCCTLSocket = path("OCSERV_UI_OCCTL_SOCKET", cfg.OCCTLSocket)
 	cfg.OperationLock = path("OCSERV_UI_OPERATION_LOCK", cfg.OperationLock)
+	cfg.RestartTrigger = path("OCSERV_UI_RESTART_TRIGGER", cfg.RestartTrigger)
+	cfg.CertRenewTrigger = path("OCSERV_UI_CERT_RENEW_TRIGGER", cfg.CertRenewTrigger)
 	cfg.OCPasswordBin = path("OCSERV_UI_OCPASSWD_BIN", cfg.OCPasswordBin)
 	cfg.OCCTLBin = path("OCSERV_UI_OCCTL_BIN", cfg.OCCTLBin)
 

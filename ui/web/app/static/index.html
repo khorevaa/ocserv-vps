@@ -58,6 +58,12 @@
       <rect x="8" y="8" width="11" height="12" rx="2"></rect>
       <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"></path>
     </symbol>
+    <symbol id="icon-download" viewBox="0 0 24 24">
+      <path d="M12 3v12M7 10l5 5 5-5M4 20h16"></path>
+    </symbol>
+    <symbol id="icon-upload" viewBox="0 0 24 24">
+      <path d="M12 16V4M7 9l5-5 5 5M4 20h16"></path>
+    </symbol>
     <symbol id="icon-logout" viewBox="0 0 24 24">
       <path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5"></path>
       <path d="M14 8l4 4-4 4M8 12h10"></path>
@@ -172,7 +178,12 @@
                 <h2>ocserv</h2>
                 <span id="service-status" class="status-badge status-badge--neutral">Загрузка…</span>
               </div>
-              <p id="service-domain" class="service-domain">—</p>
+              <div class="service-domain-row">
+                <p id="service-domain" class="service-domain">—</p>
+                <button id="copy-domain-button" class="copy-icon-button" type="button" aria-label="Копировать доменное имя VPN" title="Копировать доменное имя" disabled>
+                  <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
+                </button>
+              </div>
             </div>
             <a class="service-stat service-stat--link" href="#connections" aria-label="Открыть активные подключения">
               <strong id="active-connections">—</strong>
@@ -205,10 +216,17 @@
                 <span id="certificate-state" class="status-dot-label"><i></i><span>—</span></span>
               </div>
               <dl class="detail-list">
+                <div><dt>Кем выпущен</dt><dd id="certificate-issuer">—</dd></div>
                 <div><dt>Действует до</dt><dd id="certificate-expiry">—</dd></div>
                 <div><dt>Осталось</dt><dd id="certificate-days">—</dd></div>
                 <div><dt>Последняя проверка</dt><dd id="openconnect-check">—</dd></div>
               </dl>
+              <div class="card-footer-actions">
+                <button id="renew-certificate-button" class="button button--secondary" type="button">
+                  <svg aria-hidden="true"><use href="#icon-refresh"></use></svg>
+                  <span>Обновить сертификат</span>
+                </button>
+              </div>
             </article>
 
             <article class="info-card info-card--wide">
@@ -220,8 +238,24 @@
                 <div><dt>Версия UI</dt><dd id="ui-version">—</dd></div>
                 <div><dt>Образ UI</dt><dd id="ui-image" class="code-value">—</dd></div>
                 <div>
+                  <dt>SSH-команда подключения</dt>
+                  <dd class="copy-value">
+                    <code id="ui-ssh-command" class="command-value">—</code>
+                    <button id="copy-ssh-command-button" class="copy-icon-button" type="button" aria-label="Копировать SSH-команду" title="Копировать SSH-команду" disabled>
+                      <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
+                    </button>
+                  </dd>
+                </div>
+                <div>
                   <dt>Секрет доступа</dt>
-                  <dd class="secret-mask"><code id="ui-access-mask">••••••••••••••••</code><span id="ui-access-state">Секрет настроен</span></dd>
+                  <dd class="secret-mask">
+                    <code id="ui-access-mask">••••••••••••••••</code>
+                    <span id="ui-access-state">Секрет настроен</span>
+                    <button id="copy-ui-secret-button" class="button button--secondary" type="button">
+                      <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
+                      <span>Копировать секрет</span>
+                    </button>
+                  </dd>
                 </div>
               </dl>
             </article>
@@ -321,10 +355,21 @@
             <div>
               <h1 id="users-title">Пользователи</h1>
             </div>
-            <button id="add-user-button" class="button button--primary" type="button">
-              <svg aria-hidden="true"><use href="#icon-plus"></use></svg>
-              <span>Добавить пользователя</span>
-            </button>
+            <div class="page-actions">
+              <button id="export-users-button" class="button button--secondary" type="button">
+                <svg aria-hidden="true"><use href="#icon-download"></use></svg>
+                <span>Экспорт</span>
+              </button>
+              <button id="import-users-button" class="button button--secondary" type="button">
+                <svg aria-hidden="true"><use href="#icon-upload"></use></svg>
+                <span>Импорт</span>
+              </button>
+              <input id="users-import-file" class="visually-hidden" type="file" accept="application/json,.json">
+              <button id="add-user-button" class="button button--primary" type="button">
+                <svg aria-hidden="true"><use href="#icon-plus"></use></svg>
+                <span>Добавить пользователя</span>
+              </button>
+            </div>
           </div>
 
           <div id="users-error" class="alert alert--danger is-hidden" role="alert"></div>
@@ -426,7 +471,35 @@
       </form>
     </section>
 
-    <section id="credential-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="credential-title">
+    <section id="import-users-modal" class="modal is-hidden" role="dialog" aria-modal="true" aria-labelledby="import-users-title">
+      <header class="modal-header">
+        <div>
+          <p class="eyebrow">Перенос пользователей</p>
+          <h2 id="import-users-title">Импортировать пользователей</h2>
+        </div>
+        <button class="icon-button modal-close" type="button" aria-label="Закрыть окно">
+          <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+        </button>
+      </header>
+      <form id="import-users-form">
+        <div class="modal-body">
+          <div id="import-users-error" class="alert alert--danger is-hidden" role="alert"></div>
+          <p>Файл: <strong id="import-users-file-name">—</strong></p>
+          <p>Записей пользователей: <strong id="import-users-count">0</strong></p>
+          <label class="checkbox-field">
+            <input id="replace-users" type="checkbox">
+            <span>Заменить весь список пользователей данными из файла</span>
+          </label>
+          <p class="modal-note modal-note--warning">Экспорт содержит хеши паролей и является чувствительным файлом. В режиме замены пользователи, которых нет в файле, будут удалены.</p>
+        </div>
+        <footer class="modal-actions">
+          <button class="button button--secondary modal-close" type="button">Отмена</button>
+          <button id="import-users-submit" class="button button--primary" type="submit">Импортировать</button>
+        </footer>
+      </form>
+    </section>
+
+    <section id="credential-modal" class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="credential-title">
       <header class="modal-header">
         <div>
           <p class="eyebrow">Учётные данные готовы</p>
@@ -453,10 +526,27 @@
               </button>
             </dd>
           </div>
+          <div>
+            <dt>Конфигурация подключения для телефона или роутера</dt>
+            <dd>
+              <textarea id="credential-config" class="config-output" readonly autocomplete="off" spellcheck="false" aria-label="Текстовая конфигурация VPN"></textarea>
+              <div class="credential-config-actions">
+                <button id="copy-config-button" class="button button--secondary" type="button">
+                  <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
+                  <span>Копировать конфигурацию</span>
+                </button>
+                <button id="download-config-button" class="button button--secondary" type="button">
+                  <svg aria-hidden="true"><use href="#icon-download"></use></svg>
+                  <span>Скачать .txt</span>
+                </button>
+              </div>
+              <p class="field-help">Тип VPN: Cisco AnyConnect / OpenConnect. Пароль также находится в тексте и показывается только в этом окне.</p>
+            </dd>
+          </div>
         </dl>
       </div>
       <footer class="modal-actions">
-        <button id="credential-close" class="button button--primary" type="button">Я сохранил пароль</button>
+        <button id="credential-close" class="button button--primary" type="button">Я сохранил данные</button>
       </footer>
     </section>
 

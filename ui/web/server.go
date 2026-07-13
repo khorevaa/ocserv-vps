@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
@@ -26,6 +27,7 @@ var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$`)
 var secretPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43,256}$`)
 var uiImagePattern = regexp.MustCompile(`^ghcr\.io/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 var vpnDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$`)
+var sshForwardPattern = regexp.MustCompile(`^localhost:[0-9]{1,5}:/[A-Za-z0-9._/-]+$`)
 
 type application struct {
 	config       config
@@ -117,10 +119,18 @@ func (a *application) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		a.overview(writer)
 	case path == "/api/v1/ui" && request.Method == http.MethodGet:
 		a.uiInfo(writer)
+	case path == "/api/v1/ui/access-secret" && request.Method == http.MethodPost:
+		a.revealAccessSecret(writer, request, context)
 	case path == "/api/v1/service/restart" && request.Method == http.MethodPost:
 		a.restartService(writer, request, context)
+	case path == "/api/v1/certificate/renew" && request.Method == http.MethodPost:
+		a.renewCertificate(writer, request, context)
 	case path == "/api/v1/users" && request.Method == http.MethodGet:
 		a.listUsers(writer)
+	case path == "/api/v1/users/export" && request.Method == http.MethodPost:
+		a.exportUsers(writer, request, context)
+	case path == "/api/v1/users/import" && request.Method == http.MethodPost:
+		a.importUsers(writer, request, context)
 	case path == "/api/v1/connections" && request.Method == http.MethodGet:
 		a.listConnections(writer)
 	case strings.HasPrefix(path, "/api/v1/connections/") && request.Method == http.MethodDelete:
@@ -292,10 +302,29 @@ func (a *application) uiInfo(writer http.ResponseWriter) {
 		safeVersion = version
 	}
 	noStore(writer.Header())
+	sshCommand := any(nil)
+	forward := fmt.Sprintf("localhost:%d:%s", a.config.UILocalPort, a.config.WebSocket)
+	if sshForwardPattern.MatchString(forward) {
+		sshCommand = fmt.Sprintf("ssh -p %d -N -T -L %s root@%s", a.config.SSHPort, forward, a.config.VPNDomain)
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"version": safeVersion, "image": image,
+		"version": safeVersion, "image": image, "ssh_command": sshCommand,
 		"access_secret": map[string]any{"configured": true, "masked": "••••••••••••••••"},
 	})
+}
+
+func (a *application) revealAccessSecret(writer http.ResponseWriter, request *http.Request, context requestContext) {
+	noStore(writer.Header())
+	if !a.requireCSRF(writer, request, context) {
+		return
+	}
+	secret := string(a.accessSecret)
+	if !secretPattern.MatchString(secret) {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"detail": "UI access secret is unavailable"})
+		return
+	}
+	_ = a.store.audit(auditRecord{Actor: "operator", Action: "copy_ui_access_secret", Success: true, Remote: remoteIdentity(request)})
+	writeJSON(writer, http.StatusOK, map[string]string{"access_secret": secret})
 }
 
 func (a *application) restartService(writer http.ResponseWriter, request *http.Request, context requestContext) {
@@ -309,9 +338,88 @@ func (a *application) restartService(writer http.ResponseWriter, request *http.R
 	}
 	a.controlResponse(writer, raw, err, nil)
 }
+
+func (a *application) renewCertificate(writer http.ResponseWriter, request *http.Request, context requestContext) {
+	noStore(writer.Header())
+	if !a.requireCSRF(writer, request, context) {
+		return
+	}
+	raw, err := a.control.request("renew_certificate", nil)
+	if err == nil {
+		_ = a.store.audit(auditRecord{Actor: "operator", Action: "renew_certificate", Success: true, Remote: remoteIdentity(request)})
+	}
+	a.controlResponse(writer, raw, err, nil)
+}
+
 func (a *application) listUsers(writer http.ResponseWriter) {
 	raw, err := a.control.request("list_users", nil)
 	a.controlResponse(writer, raw, err, nil)
+}
+
+func (a *application) exportUsers(writer http.ResponseWriter, request *http.Request, context requestContext) {
+	noStore(writer.Header())
+	if !a.requireCSRF(writer, request, context) {
+		return
+	}
+	raw, err := a.control.request("export_users", nil)
+	if err != nil {
+		a.controlResponse(writer, raw, err, nil)
+		return
+	}
+	backup, err := asObject(raw)
+	if err != nil {
+		writeJSON(writer, http.StatusBadGateway, map[string]string{"detail": "invalid control response"})
+		return
+	}
+	users, ok := backup["users"].([]any)
+	if !ok {
+		writeJSON(writer, http.StatusBadGateway, map[string]string{"detail": "invalid control response"})
+		return
+	}
+	_ = a.store.audit(auditRecord{Actor: "operator", Action: "export_users", Success: true, Remote: remoteIdentity(request), Details: map[string]any{"count": len(users)}})
+	writer.Header().Set("Content-Disposition", `attachment; filename="ocserv-vps-users.json"`)
+	writeJSON(writer, http.StatusOK, backup)
+}
+
+func (a *application) importUsers(writer http.ResponseWriter, request *http.Request, context requestContext) {
+	noStore(writer.Header())
+	if !a.requireCSRF(writer, request, context) {
+		return
+	}
+	var payload struct {
+		Mode   string          `json:"mode"`
+		Backup json.RawMessage `json:"backup"`
+	}
+	if decodeStrict(request, &payload) != nil || (payload.Mode != "merge" && payload.Mode != "replace") || len(payload.Backup) == 0 {
+		writeJSON(writer, 422, map[string]string{"detail": "invalid user backup request"})
+		return
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload.Backup))
+	decoder.UseNumber()
+	var backup any
+	if decoder.Decode(&backup) != nil {
+		writeJSON(writer, 422, map[string]string{"detail": "invalid user backup"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		writeJSON(writer, 422, map[string]string{"detail": "invalid user backup"})
+		return
+	}
+	raw, err := a.control.request("import_users", map[string]any{"mode": payload.Mode, "backup": backup})
+	if err != nil {
+		a.controlResponse(writer, raw, err, nil)
+		return
+	}
+	result, err := asObject(raw)
+	if err != nil {
+		writeJSON(writer, http.StatusBadGateway, map[string]string{"detail": "invalid control response"})
+		return
+	}
+	_ = a.store.audit(auditRecord{Actor: "operator", Action: "import_users", Target: payload.Mode, Success: true, Remote: remoteIdentity(request), Details: map[string]any{
+		"imported": result["imported"], "created": result["created"], "updated": result["updated"], "removed": result["removed"],
+	}})
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (a *application) listConnections(writer http.ResponseWriter) {

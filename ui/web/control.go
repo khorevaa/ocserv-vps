@@ -108,7 +108,7 @@ func overviewForWeb(raw json.RawMessage) (map[string]any, error) {
 	return map[string]any{
 		"service":                map[string]any{"status": service["status"], "uptime_seconds": service["uptime_seconds"], "version": server["version"], "image": server["image"]},
 		"vpn":                    map[string]any{"domain": server["domain"], "active_connections": service["active_sessions"], "users": result["users_total"], "port": server["vpn_port"], "network": server["vpn_network"]},
-		"certificate":            map[string]any{"not_after": certificate["expires_at"], "days_remaining": certificate["days_remaining"], "valid": certificate["valid"]},
+		"certificate":            map[string]any{"not_after": certificate["expires_at"], "days_remaining": certificate["days_remaining"], "issuer": certificate["issuer"], "valid": certificate["valid"]},
 		"last_openconnect_check": server["openconnect_checked_at"], "updated_at": server["updated_at"],
 	}, nil
 }

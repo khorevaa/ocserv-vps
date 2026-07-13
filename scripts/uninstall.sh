@@ -29,10 +29,18 @@ fi
 systemctl disable --now ocserv-vps-network.service >/dev/null 2>&1 || true
 systemctl disable --now ocserv-vps-restart.path >/dev/null 2>&1 || true
 systemctl stop ocserv-vps-restart.service >/dev/null 2>&1 || true
+systemctl disable --now ocserv-vps-certificate-renew.path >/dev/null 2>&1 || true
+systemctl stop ocserv-vps-certificate-renew.service >/dev/null 2>&1 || true
 rm -f \
   "${OCSERV_NETWORK_SERVICE}" \
   "${OCSERV_UI_RESTART_PATH_UNIT}" \
   "${OCSERV_UI_RESTART_SERVICE_UNIT}" \
+  "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" \
+  "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}" \
+  "${OCSERV_UI_CERT_RENEW_SCRIPT}" \
+  "${OCSERV_UI_CERT_SYNC_SCRIPT}" \
+  "${OCSERV_UI_CERT_DEPLOY_HOOK}" \
+  "${OCSERV_UI_CERT_RENEW_TRIGGER}" \
   "${OCSERV_UI_ACTION_TMPFILES_FILE}" \
   "${OCSERV_UI_TMPFILES_FILE}" \
   "${OCSERV_UI_ACCESS_INFO_SCRIPT}" \
@@ -68,14 +76,11 @@ fi
 sysctl --system >/dev/null 2>&1 || true
 
 if [[ "${PURGE_DATA}" == 1 ]]; then
-  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  if [[ -d "${OCSERV_STACK_ROOT}" ]]; then
-    install -d -m 0700 "${OCSERV_BACKUP_ROOT}"
-    tar -C "$(dirname "${OCSERV_STACK_ROOT}")" -czf \
-      "${OCSERV_BACKUP_ROOT}/${timestamp}-before-uninstall.tar.gz" \
-      "$(basename "${OCSERV_STACK_ROOT}")"
-  fi
-  rm -rf "${OCSERV_STACK_ROOT}" "${OCSERV_UI_WEB_RUN_DIR}" "${OCSERV_UI_ACTION_DIR}"
+  rm -rf \
+    "${OCSERV_STACK_ROOT}" \
+    "${OCSERV_BACKUP_ROOT}" \
+    "${OCSERV_UI_WEB_RUN_DIR}" \
+    "${OCSERV_UI_ACTION_DIR}"
   rm -f \
     /root/ocserv-vps-ui-access \
     /root/ocserv-vps-initial-credentials \
