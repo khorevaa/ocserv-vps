@@ -14,7 +14,8 @@ Usage: remote-bootstrap-vps.sh --domain <fqdn> --acme-email <email>
   --vpn-username <name> --version <version>
   --image <ghcr.io/owner/image:version>
   --vpn-network <cidr> --vpn-port <port> --ssh-port <port>
-  --approve-firewall --approve-restart [--prepare-nginx]
+  --approve-firewall --approve-restart [--prepare-nginx] [--camouflage]
+Camouflage values are received through the manager's protected environment handoff.
 EOF
 }
 
@@ -30,6 +31,9 @@ DNS_SECONDARY="1.0.0.1"
 SSH_PORT="22"
 PUBLIC_INTERFACE=""
 PREPARE_NGINX="0"
+CAMOUFLAGE="0"
+CAMOUFLAGE_SECRET="${OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET:-}"
+CAMOUFLAGE_REALM="${OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM:-}"
 APPROVE_FIREWALL="0"
 APPROVE_RESTART="0"
 
@@ -46,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --dns-secondary) DNS_SECONDARY="${2:-}"; shift 2 ;;
     --ssh-port) SSH_PORT="${2:-}"; shift 2 ;;
     --public-interface) PUBLIC_INTERFACE="${2:-}"; shift 2 ;;
+    --camouflage) CAMOUFLAGE="1"; shift ;;
     --prepare-nginx) PREPARE_NGINX="1"; shift ;;
     --approve-firewall) APPROVE_FIREWALL="1"; shift ;;
     --approve-restart) APPROVE_RESTART="1"; shift ;;
@@ -66,6 +71,15 @@ validate_version "${VERSION}"
 validate_registry_image "${IMAGE}"
 validate_port 'VPN port' "${VPN_PORT}"
 validate_port 'SSH port' "${SSH_PORT}"
+if [[ "${CAMOUFLAGE}" == "1" ]]; then
+  [[ -z "${CAMOUFLAGE_SECRET}" ]] || validate_camouflage_secret "${CAMOUFLAGE_SECRET}"
+  CAMOUFLAGE_REALM="${CAMOUFLAGE_REALM:-Test Environment}"
+  validate_camouflage_realm "${CAMOUFLAGE_REALM}"
+else
+  [[ -z "${CAMOUFLAGE_SECRET}" && -z "${CAMOUFLAGE_REALM}" ]] || \
+    die 'Camouflage settings require --camouflage.'
+fi
+unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM
 
 [[ -r /etc/os-release ]] || die '/etc/os-release is unavailable.'
 OS_ID="$(. /etc/os-release; printf '%s' "${ID:-}")"
@@ -82,6 +96,10 @@ apt-get install -y --no-install-recommends \
   ca-certificates curl python3 openssl certbot iproute2 iptables \
   openconnect vpnc-scripts
 install_docker_engine
+
+if [[ "${CAMOUFLAGE}" == "1" && -z "${CAMOUFLAGE_SECRET}" ]]; then
+  CAMOUFLAGE_SECRET="$(openssl rand -hex 16)"
+fi
 
 validate_ipv4_cidr "${VPN_NETWORK}" || die "Invalid VPN network: ${VPN_NETWORK}"
 if [[ -z "${PUBLIC_INTERFACE}" ]]; then
@@ -147,7 +165,9 @@ install -d -m 0750 "${OCSERV_STACK_ROOT}" "${OCSERV_CONFIG_DIR}" "${OCSERV_IMAGE
 pull_verified_image "${IMAGE}" "${VERSION}"
 IMAGE="${RESOLVED_IMAGE}"
 
-render_ocserv_config "${DOMAIN}" "${VPN_NETWORK}" "${VPN_PORT}" "${DNS_PRIMARY}" "${DNS_SECONDARY}"
+render_ocserv_config "${DOMAIN}" "${VPN_NETWORK}" "${VPN_PORT}" "${DNS_PRIMARY}" "${DNS_SECONDARY}" \
+  "${CAMOUFLAGE}" "${CAMOUFLAGE_SECRET}" "${CAMOUFLAGE_REALM}"
+VPN_SERVER_URL="$(ocserv_connection_url "${DOMAIN}" "${VPN_PORT}")"
 render_compose_file
 write_stack_env "${IMAGE}"
 create_password_user "${IMAGE}" "${VPN_USERNAME}"
@@ -157,6 +177,7 @@ install -m 0600 /dev/null /root/ocserv-vps-initial-credentials
 cat > /root/ocserv-vps-initial-credentials <<EOF
 username=${VPN_USERNAME}
 password=${GENERATED_VPN_PASSWORD}
+server=${VPN_SERVER_URL}
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
@@ -215,6 +236,7 @@ BOOTSTRAP_COMMITTED="1"
 info "Full VPS bootstrap completed for ${DOMAIN}."
 info "Docker image: ${IMAGE}"
 printf '\n%s\n' 'Sensitive initial VPN credentials follow. Store them securely.'
+printf 'VPN server: %s\n' "${VPN_SERVER_URL}"
 printf 'VPN username: %s\n' "${VPN_USERNAME}"
 printf 'VPN password: %s\n' "${GENERATED_VPN_PASSWORD}"
 info 'Initial VPN credentials were written root-only to /root/ocserv-vps-initial-credentials.'

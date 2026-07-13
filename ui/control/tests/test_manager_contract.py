@@ -64,6 +64,14 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn("OCSERV_APPROVE_FIREWALL", self.manager)
         self.assertIn("OCSERV_APPROVE_RESTART", self.manager)
         self.assertIn("OCSERV_APPROVE_UNINSTALL", self.manager)
+        self.assertIn("OCSERV_CAMOUFLAGE", self.manager)
+        self.assertIn("OCSERV_CAMOUFLAGE_SECRET", self.manager)
+        self.assertIn("OCSERV_CAMOUFLAGE_REALM", self.manager)
+        self.assertIn('args+=(--camouflage)', self.manager)
+        self.assertIn('OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET="${camouflage_secret}"', self.manager)
+        self.assertIn('OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM="${camouflage_realm}"', self.manager)
+        self.assertIn("unset OCSERV_CAMOUFLAGE_SECRET OCSERV_CAMOUFLAGE_REALM", self.manager)
+        self.assertNotIn('args+=(--camouflage-secret', self.manager)
         self.assertIn("runtime_task bootstrap-vps.sh", self.manager)
         self.assertIn("runtime_task install-ui.sh", self.manager)
         self.assertIn("show_initial_vpn_credentials", self.manager)
@@ -169,6 +177,65 @@ printf 'selected=%s\n' "${selected}"
             content = (self.repository / relative).read_text(encoding="utf-8")
             self.assertIn(product_source, content)
             self.assertNotIn("ocserv-vps-skil", content)
+
+    @unittest.skipUnless(BASH, "bash is required for Camouflage URL tests")
+    def test_camouflage_connection_url_is_safe_and_deterministic(self) -> None:
+        common = (self.repository / "scripts" / "common.sh").read_text(
+            encoding="utf-8"
+        )
+        scenario = r'''
+config_root="$(mktemp -d)"
+trap 'rm -rf "${config_root}"' EXIT
+OCSERV_CONFIG_DIR="${config_root}"
+
+printf '%s\n' 'camouflage = false' > "${OCSERV_CONFIG_DIR}/ocserv.conf"
+printf 'plain=%s\n' "$(ocserv_connection_url vpn.example.com 443)"
+
+cat > "${OCSERV_CONFIG_DIR}/ocserv.conf" <<'EOF'
+camouflage = true
+camouflage_secret = "camouflage-secret-2026"
+EOF
+printf 'hidden=%s\n' "$(ocserv_connection_url vpn.example.com 443)"
+
+validate_camouflage_realm 'Test Environment'
+printf '%s\n' 'realm=Test Environment'
+
+printf '%s\n' 'camouflage = true' 'camouflage_secret = short' > "${OCSERV_CONFIG_DIR}/ocserv.conf"
+if (ocserv_connection_url vpn.example.com 443 >/dev/null 2>&1); then
+  printf '%s\n' 'unsafe secret was accepted' >&2
+  exit 1
+fi
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / "camouflage-url-test.sh"
+            script.write_text(common + scenario, encoding="utf-8")
+            environment = os.environ.copy()
+            if os.name == "nt":
+                environment["PATH"] = ";".join(
+                    (
+                        "C:/Program Files/Git/usr/bin",
+                        "C:/Program Files/Git/bin",
+                        environment.get("PATH", ""),
+                    )
+                )
+            result = subprocess.run(
+                [BASH, str(script)],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("plain=https://vpn.example.com:443/", result.stdout)
+        self.assertIn(
+            "hidden=https://vpn.example.com:443/?camouflage-secret-2026",
+            result.stdout,
+        )
+        self.assertIn("realm=Test Environment", result.stdout)
 
 
 if __name__ == "__main__":

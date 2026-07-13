@@ -499,6 +499,50 @@ validate_interface() {
   [[ "$1" =~ ^[A-Za-z0-9_.:-]{1,32}$ ]] || die "Unsafe interface name: $1"
 }
 
+validate_camouflage_secret() {
+  [[ "$1" =~ ^[A-Za-z0-9._~-]{16,128}$ ]] || \
+    die 'Camouflage secret must contain 16-128 URL-safe characters (letters, digits, . _ ~ -).'
+}
+
+validate_camouflage_realm() {
+  [[ "$1" =~ ^[A-Za-z0-9][-A-Za-z0-9._\ ]{0,63}$ ]] || \
+    die 'Camouflage realm must contain 1-64 safe characters and start with a letter or digit.'
+}
+
+ocserv_connection_url() {
+  local domain="$1" vpn_port="$2" config="${OCSERV_CONFIG_DIR}/ocserv.conf"
+  local line key value enabled='' secret='' base
+  validate_domain "${domain}"
+  validate_port 'VPN port' "${vpn_port}"
+  [[ -f "${config}" && ! -L "${config}" ]] || die 'The managed ocserv configuration is missing or unsafe.'
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%%#*}"
+    [[ "${line}" == *"="* ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    case "${key}" in
+      camouflage) enabled="${value,,}" ;;
+      camouflage_secret) secret="${value}" ;;
+    esac
+  done < "${config}"
+  base="https://${domain}:${vpn_port}/"
+  case "${enabled}" in
+    '' | false) printf '%s\n' "${base}" ;;
+    true)
+      validate_camouflage_secret "${secret}"
+      printf '%s?%s\n' "${base}" "${secret}"
+      ;;
+    *) die 'The managed ocserv configuration contains an invalid camouflage value.' ;;
+  esac
+}
+
 state_get() {
   local key="$1"
   [[ -f "${OCSERV_STATE_FILE}" ]] || return 0
@@ -903,6 +947,22 @@ health_check_ui_stack() {
 
 render_ocserv_config() {
   local domain="$1" vpn_network="$2" vpn_port="$3" dns_primary="$4" dns_secondary="$5"
+  local camouflage="${6:-0}" camouflage_secret="${7:-}" camouflage_realm="${8:-}"
+  local camouflage_config='camouflage = false'
+  case "${camouflage}" in
+    0 | false)
+      [[ -z "${camouflage_secret}" && -z "${camouflage_realm}" ]] || \
+        die 'Camouflage settings were provided while Camouflage is disabled.'
+      ;;
+    1 | true)
+      validate_camouflage_secret "${camouflage_secret}"
+      validate_camouflage_realm "${camouflage_realm}"
+      camouflage_config="camouflage = true
+camouflage_secret = \"${camouflage_secret}\"
+camouflage_realm = \"${camouflage_realm}\""
+      ;;
+    *) die 'Camouflage must be enabled or disabled.' ;;
+  esac
   install -d -m 0750 "${OCSERV_CONFIG_DIR}"
   cat > "${OCSERV_CONFIG_DIR}/ocserv.conf" <<EOF
 auth = "plain[passwd=/etc/ocserv/ocpasswd]"
@@ -942,6 +1002,7 @@ dns = ${dns_secondary}
 route = default
 tunnel-all-dns = true
 cisco-client-compat = true
+${camouflage_config}
 EOF
   chmod 0640 "${OCSERV_CONFIG_DIR}/ocserv.conf"
   render_vpn_journal_assets
@@ -983,7 +1044,7 @@ ensure_openconnect_probe_tools() {
   fi
   for tool in openconnect curl ip timeout; do require_command "${tool}"; done
   help_text="$(openconnect --help 2>&1 || true)"
-  for tool in --background --interface --non-inter --passwd-on-stdin --pid-file --resolve --script; do
+  for tool in --background --config --interface --non-inter --passwd-on-stdin --pid-file --resolve --script; do
     grep -q -- "${tool}" <<<"${help_text}" || die "Installed openconnect does not advertise ${tool}."
   done
   OPENCONNECT_VPNC_SCRIPT=""
@@ -997,12 +1058,13 @@ verify_openconnect_data_path() (
   set -euo pipefail
   local domain="$1" vpn_port="$2" username="$3" password="$4"
   local resolved_ip server_ip suffix namespace host_interface peer_interface
-  local password_file script_file pid_file probe_network
+  local password_file client_config_file script_file pid_file probe_network server_url
 
   validate_domain "${domain}"
   validate_port 'VPN port' "${vpn_port}"
   validate_username "${username}"
   [[ -n "${password}" ]] || die 'OpenConnect probe password is empty.'
+  server_url="$(ocserv_connection_url "${domain}" "${vpn_port}")"
   ensure_openconnect_probe_tools
 
   resolved_ip="$(getent ahostsv4 "${domain}" | awk '$2 == "STREAM" {print $1; exit}')"
@@ -1018,6 +1080,7 @@ verify_openconnect_data_path() (
   peer_interface="ocvn${suffix}"
   probe_network='198.18.0.0/30'
   password_file="/run/ocserv-vps-openconnect-${suffix}.password"
+  client_config_file="/run/ocserv-vps-openconnect-${suffix}.conf"
   script_file="${OCSERV_BIN_DIR}/openconnect-${suffix}-vpnc-script"
   pid_file="/run/ocserv-vps-openconnect-${suffix}.pid"
 
@@ -1026,19 +1089,21 @@ verify_openconnect_data_path() (
     set +e
     ip netns del "${namespace}" >/dev/null 2>&1
     ip link del "${host_interface}" >/dev/null 2>&1
-    rm -f "${password_file}" "${script_file}" "${pid_file}"
+    rm -f "${password_file}" "${client_config_file}" "${script_file}" "${pid_file}"
     exit "${status}"
   }
   trap cleanup_probe EXIT
   trap 'exit 130' HUP INT TERM
 
   (umask 077; printf '%s\n' "${password}" > "${password_file}")
+  (umask 077; printf 'server=%s\n' "${server_url}" > "${client_config_file}")
   cat > "${script_file}" <<EOF
 #!/bin/sh
 unset INTERNAL_IP4_DNS INTERNAL_IP6_DNS CISCO_DEF_DOMAIN CISCO_SPLIT_DNS
 exec '${OPENCONNECT_VPNC_SCRIPT}' "\$@"
 EOF
   chmod 0600 "${password_file}"
+  chmod 0600 "${client_config_file}"
   chmod 0700 "${script_file}"
 
   ip netns add "${namespace}"
@@ -1060,6 +1125,7 @@ EOF
       password_file="$5"
       script_file="$6"
       pid_file="$7"
+      client_config_file="$8"
 
       cleanup_client() {
         set +e
@@ -1079,6 +1145,7 @@ EOF
 
       env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u all_proxy -u https_proxy -u http_proxy \
         openconnect \
+          --config="${client_config_file}" \
           --protocol=anyconnect \
           --interface=ocprobe0 \
           --user="${username}" \
@@ -1087,8 +1154,7 @@ EOF
           --background \
           --pid-file="${pid_file}" \
           --script="${script_file}" \
-          --resolve="${domain}:${server_ip}" \
-          "https://${domain}:${vpn_port}" < "${password_file}"
+          --resolve="${domain}:${server_ip}" < "${password_file}"
 
       [[ -s "${pid_file}" ]] || { printf "%s\n" "OpenConnect did not create a PID file." >&2; exit 1; }
       kill -0 "$(cat "${pid_file}")"
@@ -1105,7 +1171,7 @@ EOF
         curl --noproxy "*" --interface ocprobe0 --fail --silent --show-error --max-time 20 \
           https://1.1.1.1/cdn-cgi/trace)"
       grep -q "^ip=" <<<"${probe_output}" || { printf "%s\n" "HTTPS probe did not return a client IP." >&2; exit 1; }
-    ' _ "${domain}" "${vpn_port}" "${username}" "${server_ip}" "${password_file}" "${script_file}" "${pid_file}"
+    ' _ "${domain}" "${vpn_port}" "${username}" "${server_ip}" "${password_file}" "${script_file}" "${pid_file}" "${client_config_file}"
 
   info "Mandatory OpenConnect authentication and tunneled HTTPS probe passed for ${domain}:${vpn_port}."
 )
