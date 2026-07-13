@@ -298,6 +298,10 @@ func (s *controlService) overview() (map[string]any, error) {
 	if status != "online" && status != "offline" {
 		status = "unknown"
 	}
+	version, err := s.ocservVersion()
+	if err != nil {
+		return nil, err
+	}
 	users, err := s.readUsernames()
 	if err != nil {
 		return nil, err
@@ -310,7 +314,7 @@ func (s *controlService) overview() (map[string]any, error) {
 			"active_sessions": safeNonnegativeInt(findValue(statusData, "active sessions"), 0),
 		},
 		"server": map[string]any{
-			"version":                safeVersion(state["current_version"]),
+			"version":                version,
 			"image":                  safeImage(state["current_image"]),
 			"domain":                 domain,
 			"vpn_network":            safeNetwork(state["vpn_network"]),
@@ -321,6 +325,25 @@ func (s *controlService) overview() (map[string]any, error) {
 		"certificate": s.certificateInfo(domain),
 		"users_total": len(users),
 	}, nil
+}
+
+func (s *controlService) ocservVersion() (string, error) {
+	raw, err := s.runner.Run([]string{s.config.OCServBin, "--version"}, "")
+	if err != nil {
+		return "", err
+	}
+	const prefix = "OpenConnect VPN Server "
+	for _, line := range strings.Split(raw, "\n") {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		version := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if versionPattern.MatchString(version) {
+			return version, nil
+		}
+		break
+	}
+	return "", controlFailure(503, "backend_error", "The ocserv backend returned an invalid version.")
 }
 
 func (s *controlService) listUsers() (map[string]any, error) {
@@ -599,7 +622,7 @@ func (s *controlService) occtlJSON(arguments ...string) (any, error) {
 
 func (s *controlService) readState() (map[string]string, error) {
 	allowed := map[string]bool{
-		"current_version": true, "current_image": true, "domain": true,
+		"current_image": true, "domain": true,
 		"vpn_network": true, "vpn_port": true, "openconnect_checked_at": true, "updated_at": true,
 	}
 	content, missing, err := readRegularFile(s.config.StatePath, maxStateBytes)

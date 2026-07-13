@@ -57,7 +57,7 @@ sudo ocserv-vps install
 Конкретную версию менеджера можно указать аргументом:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.4
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.6
 ```
 
 ## Управление

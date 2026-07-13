@@ -57,6 +57,9 @@ func (f *fakeRunner) Run(argv []string, stdin string) (string, error) {
 		return "", nil
 	}
 	if filepath.Base(argv[0]) == "ocserv" {
+		if reflect.DeepEqual(argv[1:], []string{"--version"}) {
+			return "OpenConnect VPN Server 1.5.0\nCompiled with: seccomp\n", nil
+		}
 		if f.failConfig {
 			return "", controlFailure(503, "backend_error", "rejected")
 		}
@@ -109,8 +112,8 @@ func testService(t *testing.T) (*controlService, *fakeRunner, config) {
 	}
 	state := filepath.Join(root, "state")
 	stateBody := strings.Join([]string{
-		"current_version=1.5.0",
-		"current_image=ghcr.io/khorevaa/ocserv-vps-server:1.5.0",
+		"current_version=1.5.0-slim",
+		"current_image=ghcr.io/khorevaa/ocserv-vps-server:1.5.0-slim",
 		"domain=vpn.example.com",
 		"vpn_network=10.66.0.0/24",
 		"vpn_port=443",
@@ -280,6 +283,10 @@ func TestOverviewAndUsersAreAllowlisted(t *testing.T) {
 	serviceData := overview["service"].(map[string]any)
 	if serviceData["status"] != "online" || serviceData["uptime_seconds"] != 1234 || serviceData["active_sessions"] != 2 {
 		t.Fatalf("unexpected service data: %#v", serviceData)
+	}
+	serverData := overview["server"].(map[string]any)
+	if serverData["version"] != "1.5.0" || serverData["image"] != "ghcr.io/khorevaa/ocserv-vps-server:1.5.0-slim" {
+		t.Fatalf("unexpected server data: %#v", serverData)
 	}
 	encoded, _ := json.Marshal(overview)
 	if strings.Contains(string(encoded), "last_backup") || strings.Contains(string(encoded), "Private backend detail") {

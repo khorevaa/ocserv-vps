@@ -433,6 +433,25 @@ class InstallComposeContractTests(unittest.TestCase):
             self.assertIn("border: 1px solid", block)
         self.assertNotIn("#83510a", styles)
 
+    def test_theme_toggle_defaults_to_and_tracks_the_os_theme(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        static = repository / "ui" / "web" / "app" / "static"
+        index = (static / "index.html").read_text(encoding="utf-8")
+        app = (static / "app.js").read_text(encoding="utf-8")
+        styles = (static / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="theme-button" class="theme-toggle"', index)
+        self.assertIn('role="switch" aria-checked="false"', index)
+        self.assertIn('href="#icon-sun"', index)
+        self.assertIn('href="#icon-moon"', index)
+        self.assertNotIn('id="theme-menu"', index)
+        self.assertIn('window.matchMedia("(prefers-color-scheme: dark)")', app)
+        self.assertIn('localStorage.getItem("ocserv-ui-theme") || "system"', app)
+        self.assertIn('document.documentElement.removeAttribute("data-theme")', app)
+        self.assertIn('if (currentTheme === "system") applyTheme("system");', app)
+        self.assertIn('themeButton.setAttribute("aria-checked", String(dark))', app)
+        self.assertIn('.theme-toggle[aria-checked="true"] .theme-toggle__thumb', styles)
+
     def test_controller_tunnel_helpers_use_exact_installed_url(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         shell_helper = (repository / "helpers" / "ui-tunnel.sh").read_text(
