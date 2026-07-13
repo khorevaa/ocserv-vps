@@ -108,7 +108,7 @@ install_stack() {
   prompt_value domain 'VPN domain' '' OCSERV_DOMAIN
   prompt_value email 'ACME email' '' OCSERV_ACME_EMAIL
   prompt_value username 'Initial VPN username' 'vpnuser' OCSERV_VPN_USERNAME
-  prompt_value version 'ocserv image version' '1.5.0' OCSERV_VERSION
+  prompt_value version 'ocserv image version' '1.5.0-slim' OCSERV_VERSION
   prompt_value vpn_network 'VPN IPv4 network' '10.66.0.0/24' OCSERV_VPN_NETWORK
   prompt_value vpn_port 'VPN TCP/UDP port' '443' OCSERV_VPN_PORT
   prompt_value dns_primary 'Primary DNS' '1.1.1.1' OCSERV_DNS_PRIMARY
@@ -132,7 +132,7 @@ install_stack() {
   runtime_task bootstrap-vps.sh "${args[@]}"
 
   if [[ ${install_ui} -eq 1 ]]; then
-    prompt_value ui_version 'UI version' '0.4.11' OCSERV_UI_VERSION
+    prompt_value ui_version 'UI version' '0.4.12' OCSERV_UI_VERSION
     runtime_task install-ui.sh \
       --ui-version "${ui_version}" \
       --ui-image "ghcr.io/khorevaa/ocserv-vps-ui-web:${ui_version}" \
@@ -172,7 +172,7 @@ rollback_vpn() {
 install_ui() {
   require_root
   local version ssh_port
-  prompt_value version 'UI version' '0.4.11' OCSERV_UI_VERSION
+  prompt_value version 'UI version' '0.4.12' OCSERV_UI_VERSION
   prompt_value ssh_port 'SSH port for tunnel instructions' '22' OCSERV_SSH_PORT
   require_approval 'VPN/UI restart during UI installation' OCSERV_APPROVE_RESTART
   runtime_task install-ui.sh \

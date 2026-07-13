@@ -40,7 +40,7 @@ VPN_PORT="$(state_get vpn_port)"
 pull_verified_image "${IMAGE}" "${VERSION}"
 NEW_IMAGE="${RESOLVED_IMAGE}"
 test_image_config "${NEW_IMAGE}"
-require_ui_control_compatibility "${NEW_IMAGE}"
+require_ui_control_compatibility "${NEW_IMAGE}" "${OLD_IMAGE}"
 create_stack_backup "deploy-${VERSION}"
 BACKUP_DIR="${LAST_BACKUP}"
 
@@ -51,6 +51,11 @@ restore_previous_image() {
   local restore_failed=0
   warn "Restoring ${OLD_IMAGE}."
   set +e
+  if [[ -f "${BACKUP_DIR}/config.tar" ]] && \
+     ! tar -C "${OCSERV_STACK_ROOT}" -xpf "${BACKUP_DIR}/config.tar"; then
+    warn 'Failed to restore the previous ocserv configuration.'
+    restore_failed=1
+  fi
   if ! write_stack_env "${OLD_IMAGE}"; then
     warn 'Failed to restore the previous stack.env.'
     restore_failed=1
@@ -91,6 +96,10 @@ on_exit() {
 }
 trap on_exit EXIT
 trap 'exit 130' HUP INT TERM
+
+# Manager 0.1.1 rendered a Bash-only journal hook. Refresh it transactionally
+# before activating the scratch runtime, which intentionally ships only POSIX sh.
+ensure_vpn_journal_config
 
 info "Activating ${NEW_IMAGE}; active VPN sessions will disconnect."
 write_stack_env "${NEW_IMAGE}"

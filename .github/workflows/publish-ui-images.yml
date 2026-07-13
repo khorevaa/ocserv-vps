@@ -15,7 +15,7 @@ on:
       ocserv_image:
         description: Exact ghcr.io ocserv image version tag used by the control image
         required: true
-        default: ghcr.io/khorevaa/ocserv-vps-server:1.5.0
+        default: ghcr.io/khorevaa/ocserv-vps-server:1.5.0-slim
         type: string
 
 permissions:
@@ -43,7 +43,8 @@ jobs:
           [[ "${GITHUB_REPOSITORY_OWNER,,}" == 'khorevaa' ]]
           [[ "${VERSION}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
           [[ "${GO_BUILD_IMAGE}" == 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' ]]
-          [[ "${OCSERV_IMAGE}" == 'ghcr.io/khorevaa/ocserv-vps-server:1.5.0' ]]
+          [[ "${OCSERV_IMAGE}" =~ ^ghcr\.io/khorevaa/ocserv-vps-server:[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
+          [[ "${OCSERV_IMAGE##*:}" != 'latest' ]]
 
       - name: Check shell syntax
         run: |
@@ -105,7 +106,8 @@ jobs:
           [[ "${GITHUB_REF}" == 'refs/heads/develop' ]]
           [[ "${VERSION}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
           [[ "${GO_BUILD_IMAGE}" == 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' ]]
-          [[ "${OCSERV_IMAGE}" == 'ghcr.io/khorevaa/ocserv-vps-server:1.5.0' ]]
+          [[ "${OCSERV_IMAGE}" =~ ^ghcr\.io/khorevaa/ocserv-vps-server:[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
+          [[ "${OCSERV_IMAGE##*:}" != 'latest' ]]
 
       - name: Authenticate to GHCR
         env:

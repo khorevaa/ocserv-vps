@@ -565,15 +565,18 @@ health_check_stack() {
 }
 
 require_ui_control_compatibility() {
-  local expected_ocserv_image="$1" control_image configured_ocserv_image
+  local expected_ocserv_image control_image configured_ocserv_image
+  (( $# > 0 )) || die 'At least one compatible ocserv image is required.'
   [[ -f "${OCSERV_UI_COMPOSE_FILE}" && -f "${OCSERV_UI_ENV_FILE}" ]] || return 0
   control_image="$(awk -F= '$1 == "OCSERV_CONTROL_IMAGE" {print substr($0, index($0, "=") + 1)}' "${OCSERV_UI_ENV_FILE}" | tail -n 1)"
   [[ -n "${control_image}" ]] || die 'Managed UI control image is missing from ui.env.'
   docker image inspect "${control_image}" >/dev/null 2>&1 || \
     die "Managed UI control image is not available locally: ${control_image}"
   configured_ocserv_image="$(docker image inspect --format '{{ index .Config.Labels "org.ocserv-vps.ocserv-image" }}' "${control_image}")"
-  [[ "${configured_ocserv_image}" == "${expected_ocserv_image}" ]] || \
-    die "Installed UI control image targets ${configured_ocserv_image:-unknown}, not ${expected_ocserv_image}; publish and install a compatible UI release first."
+  for expected_ocserv_image in "$@"; do
+    [[ "${configured_ocserv_image}" != "${expected_ocserv_image}" ]] || return 0
+  done
+  die "Installed UI control image targets ${configured_ocserv_image:-unknown}, not an image permitted for this lifecycle transition."
 }
 
 health_check_ui_stack() {
