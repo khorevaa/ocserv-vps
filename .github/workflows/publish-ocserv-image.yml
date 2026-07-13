@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       base_image:
-        description: Debian or Ubuntu base image with @sha256 digest
+        description: Alpine builder image with @sha256 digest
         required: true
         type: string
 

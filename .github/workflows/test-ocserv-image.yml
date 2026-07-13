@@ -22,9 +22,10 @@ jobs:
       SIGNATURE_URL: https://www.infradead.org/ocserv/download/ocserv-1.5.0.tar.xz.sig
       SIGNING_KEY_URL: https://ocserv.gitlab.io/www/96865171.asc
       SIGNING_KEY_FINGERPRINT: 1F42418905D8206AA754CCDC29EE58B996865171
-      BASE_IMAGE: debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+      BASE_IMAGE: alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
       CANDIDATE_IMAGE: ocserv-vps-server:multistage-test
       PUBLISHED_IMAGE: ghcr.io/khorevaa/ocserv-vps-server:1.5.0
+      REFERENCE_IMAGE: ocserv/ocserv@sha256:22661d3fa5153303e9956a90b7d6663807a32214d8c27caf5650067032096201
 
     steps:
       - name: Check out repository
@@ -65,24 +66,33 @@ jobs:
             ! ldd /usr/local/sbin/ocserv | grep -q "not found"
             test -x /usr/local/bin/occtl
             test -x /usr/local/bin/ocpasswd
+            /usr/local/bin/occtl --help >/dev/null
+            /usr/local/bin/ocpasswd --help >/dev/null
           '
 
       - name: Compare image sizes
         run: |
           set -euo pipefail
           docker pull "${PUBLISHED_IMAGE}"
+          docker pull "${REFERENCE_IMAGE}"
           candidate_size="$(docker image inspect "${CANDIDATE_IMAGE}" --format '{{.Size}}')"
           published_size="$(docker image inspect "${PUBLISHED_IMAGE}" --format '{{.Size}}')"
+          candidate_compressed="$(docker save "${CANDIDATE_IMAGE}" | gzip -9 -c | wc -c)"
+          reference_compressed="$(docker save "${REFERENCE_IMAGE}" | gzip -9 -c | wc -c)"
           reduction="$((published_size - candidate_size))"
           reduction_percent="$((reduction * 100 / published_size))"
           test "${reduction}" -gt 0
           {
             echo '## ocserv image size'
             echo
-            echo '| Image | Uncompressed size |'
-            echo '| --- | ---: |'
-            printf '| Published single-stage | %.1f MiB |\n' "$(awk -v bytes="${published_size}" 'BEGIN {print bytes / 1024 / 1024}')"
-            printf '| Multi-stage candidate | %.1f MiB |\n' "$(awk -v bytes="${candidate_size}" 'BEGIN {print bytes / 1024 / 1024}')"
+            echo '| Image | Uncompressed runtime | Compressed archive |'
+            echo '| --- | ---: | ---: |'
+            printf '| Published single-stage | %.1f MiB | — |\n' "$(awk -v bytes="${published_size}" 'BEGIN {print bytes / 1024 / 1024}')"
+            printf '| Alpine + scratch candidate | %.1f MiB | %.1f MiB |\n' \
+              "$(awk -v bytes="${candidate_size}" 'BEGIN {print bytes / 1024 / 1024}')" \
+              "$(awk -v bytes="${candidate_compressed}" 'BEGIN {print bytes / 1024 / 1024}')"
+            printf '| ocserv/ocserv reference | — | %.1f MiB |\n' \
+              "$(awk -v bytes="${reference_compressed}" 'BEGIN {print bytes / 1024 / 1024}')"
             echo
             echo "Reduction: ${reduction_percent}%"
           } | tee -a "${GITHUB_STEP_SUMMARY}"

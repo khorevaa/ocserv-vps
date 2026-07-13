@@ -2,101 +2,120 @@ ARG BASE_IMAGE
 
 FROM ${BASE_IMAGE} AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
-
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-      build-essential pkg-config meson ninja-build \
-      autoconf automake libtool gettext gperf \
-      libgnutls28-dev libev-dev libpam0g-dev liblz4-dev libseccomp-dev \
-      libreadline-dev libnl-route-3-dev libprotobuf-c-dev protobuf-c-compiler \
-      libtalloc-dev; \
-    for package in \
-      autopoint libllhttp-dev libhttp-parser-dev liboath-dev libkrb5-dev \
-      libradcli-dev libsystemd-dev libmaxminddb-dev libpcre2-dev libwrap0-dev; do \
-      if apt-cache show "${package}" >/dev/null 2>&1; then \
-        apt-get install -y --no-install-recommends "${package}"; \
-      fi; \
-    done; \
-    rm -rf /var/lib/apt/lists/*
+    apk add --no-cache \
+      autoconf automake build-base busybox-static gettext-dev gperf libtool \
+      gnutls-dev libev-dev libseccomp-dev linux-headers meson ninja \
+      pax-utils pkgconf protobuf-c-compiler protobuf-c-dev readline-dev \
+      talloc-dev tini-static
 
 COPY source /usr/src/ocserv
 
 RUN set -eux; \
     cd /usr/src/ocserv; \
     if [ -f meson.build ]; then \
-      meson setup /tmp/ocserv-build . --prefix=/usr/local --buildtype=release --wrap-mode=nodownload; \
+      meson setup /tmp/ocserv-build . \
+        --prefix=/usr/local \
+        --buildtype=release \
+        --strip \
+        --wrap-mode=nodownload \
+        -Db_lto=true \
+        -Dpam=disabled \
+        -Dradius=disabled \
+        -Dgssapi=disabled \
+        -Dliboath=disabled \
+        -Dlibnl=disabled \
+        -Dmaxmind=disabled \
+        -Dgeoip=disabled \
+        -Dlz4=disabled \
+        -Dcompression=disabled \
+        -Dseccomp=enabled \
+        -Dsystemd=disabled \
+        -Doidc-auth=disabled \
+        -Dutmp=disabled \
+        -Dlibwrap=disabled \
+        -Dpager=; \
       meson compile -C /tmp/ocserv-build; \
-      meson install -C /tmp/ocserv-build --no-rebuild --strip; \
+      meson install -C /tmp/ocserv-build --no-rebuild; \
     else \
       if [ ! -x ./configure ]; then autoreconf -fiv; fi; \
       mkdir -p /tmp/ocserv-build; \
       cd /tmp/ocserv-build; \
-      /usr/src/ocserv/configure --prefix=/usr/local; \
+      /usr/src/ocserv/configure \
+        --prefix=/usr/local \
+        --disable-pam \
+        --disable-radius \
+        --disable-gssapi \
+        --disable-oath \
+        --disable-lz4 \
+        --disable-compression; \
       make -j"$(nproc)"; \
       make install-strip; \
     fi; \
-    ldconfig; \
     /usr/local/sbin/ocserv --version; \
-    install -d -m 0755 /usr/share/licenses/ocserv; \
-    if [ -f /usr/src/ocserv/COPYING ]; then cp /usr/src/ocserv/COPYING /usr/share/licenses/ocserv/COPYING; fi; \
-    find /usr/local -type f -exec sh -c 'ldd "$1" 2>/dev/null || true' sh {} \; \
-      | awk '/=> \// {print $3} /^\// {print $1}' \
-      | sort -u > /tmp/ocserv-runtime-libraries.txt; \
-    test -s /tmp/ocserv-runtime-libraries.txt; \
-    while IFS= read -r library; do \
-      resolved="$(readlink -f "${library}")"; \
-      case "${resolved}" in /usr/local/*) continue ;; esac; \
-      dpkg-query -S "${resolved}" 2>/dev/null || dpkg-query -S "${library}"; \
-    done < /tmp/ocserv-runtime-libraries.txt \
-      | cut -d: -f1 \
-      | sort -u > /tmp/ocserv-runtime-packages.txt; \
-    test -s /tmp/ocserv-runtime-packages.txt
+    install -d -m 0755 /runtime/usr/local /runtime/usr/share/licenses/ocserv; \
+    cp -a /usr/local/. /runtime/usr/local/; \
+    if [ -f /usr/src/ocserv/COPYING ]; then \
+      cp /usr/src/ocserv/COPYING /runtime/usr/share/licenses/ocserv/COPYING; \
+    fi; \
+    { \
+      find /usr/local -type f -perm -0100 | while IFS= read -r executable; do \
+        lddtree -l "${executable}" 2>/dev/null || true; \
+      done; \
+    } | sort -u | while IFS= read -r library; do \
+      case "${library}" in \
+        /usr/local/*|'') continue ;; \
+      esac; \
+      test -f "${library}" || continue; \
+      install -d "/runtime$(dirname "${library}")"; \
+      cp -L "${library}" "/runtime${library}"; \
+    done; \
+    install -d -m 0755 \
+      /runtime/bin /runtime/etc /runtime/run/ocserv /runtime/sbin \
+      /runtime/tmp /runtime/usr/bin; \
+    chmod 1777 /runtime/tmp; \
+    cp /bin/busybox.static /runtime/bin/busybox; \
+    for applet in chmod date grep mkdir mv rmdir sh sleep tail wc; do \
+      ln -s busybox "/runtime/bin/${applet}"; \
+    done; \
+    ln -s ../../bin/busybox /runtime/usr/bin/env; \
+    cp /sbin/tini-static /runtime/sbin/tini; \
+    loader="$(find /runtime/lib -maxdepth 1 -name 'ld-musl-*.so.1' -print -quit)"; \
+    test -n "${loader}"; \
+    ln -s "../../lib/${loader##*/}" /runtime/usr/bin/ldd; \
+    printf '%s\n' \
+      'root:x:0:0:root:/root:/sbin/nologin' \
+      'ocserv:x:100:100:ocserv:/nonexistent:/sbin/nologin' \
+      > /runtime/etc/passwd; \
+    printf '%s\n' \
+      'root:x:0:' \
+      'ocserv:x:100:' \
+      > /runtime/etc/group; \
+    printf '%s\n' 'nameserver 127.0.0.11' > /runtime/etc/resolv.conf; \
+    chmod 0755 /runtime/bin/busybox /runtime/sbin/tini; \
+    find /runtime/usr/local -type f -exec strip --strip-unneeded '{}' + 2>/dev/null || true; \
+    test -x /runtime/usr/local/sbin/ocserv; \
+    test -x /runtime/usr/local/bin/occtl; \
+    test -x /runtime/usr/local/bin/ocpasswd
 
-FROM ${BASE_IMAGE} AS runtime
+FROM scratch AS runtime
 
 ARG BASE_IMAGE
 ARG OCSERV_VERSION
 ARG SOURCE_SHA256
 
 LABEL org.opencontainers.image.title="ocserv-vps" \
-      org.opencontainers.image.description="Dockerized ocserv built from a verified upstream source release" \
+      org.opencontainers.image.description="Minimal ocserv runtime built from a verified upstream source release" \
       org.opencontainers.image.source="https://github.com/khorevaa/ocserv-vps" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
       org.opencontainers.image.version="${OCSERV_VERSION}" \
       org.opencontainers.image.base.name="${BASE_IMAGE}" \
       org.ocserv-vps.source-sha256="${SOURCE_SHA256}"
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-COPY --from=builder /tmp/ocserv-runtime-packages.txt /tmp/ocserv-runtime-packages.txt
+COPY --from=builder /runtime /
+COPY --chmod=0755 entrypoint.sh /usr/local/sbin/ocserv-container-entrypoint
 
-RUN set -eux; \
-    apt-get update; \
-    xargs -r apt-get install -y --no-install-recommends < /tmp/ocserv-runtime-packages.txt; \
-    apt-get install -y --no-install-recommends \
-      ca-certificates iproute2 iptables openssl tini; \
-    rm -f /tmp/ocserv-runtime-packages.txt; \
-    rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /usr/local/ /usr/local/
-COPY --from=builder /usr/share/licenses/ocserv/ /usr/share/licenses/ocserv/
-COPY entrypoint.sh /usr/local/sbin/ocserv-container-entrypoint
-
-RUN set -eux; \
-    ldconfig; \
-    getent group ocserv >/dev/null || groupadd --system ocserv; \
-    id -u ocserv >/dev/null 2>&1 || useradd --system --gid ocserv --home-dir /nonexistent --shell /usr/sbin/nologin ocserv; \
-    install -d -m 0750 -o root -g ocserv /etc/ocserv /run/ocserv; \
-    chmod 0755 /usr/local/sbin/ocserv-container-entrypoint; \
-    /usr/local/sbin/ocserv --version; \
-    ! command -v cc; \
-    ! command -v gcc; \
-    ! command -v make; \
-    ! command -v meson; \
-    ! command -v ninja; \
-    test ! -e /usr/src/ocserv
-
-ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+ENTRYPOINT ["/sbin/tini", "-g", "--"]
 CMD ["/usr/local/sbin/ocserv-container-entrypoint"]

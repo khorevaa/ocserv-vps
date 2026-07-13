@@ -1,14 +1,13 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-args=(
-  --foreground
-  --pid-file /run/ocserv/ocserv.pid
+set -- \
+  --foreground \
+  --pid-file /run/ocserv/ocserv.pid \
   --config /etc/ocserv/ocserv.conf
-)
 
 if /usr/local/sbin/ocserv --help 2>&1 | grep -q -- '--log-stderr'; then
-  args+=(--log-stderr)
+  set -- "$@" --log-stderr
 fi
 
-exec /usr/local/sbin/ocserv "${args[@]}"
+exec /usr/local/sbin/ocserv "$@"
