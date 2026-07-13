@@ -39,6 +39,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("OCSERV_UI_JOURNAL_FILE: /opt/ocserv-vps/logs/vpn-events.jsonl", control_block)
         self.assertIn("OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}", control_block)
         self.assertIn("- ./logs:/opt/ocserv-vps/logs:ro", control_block)
+        self.assertIn("- ./camouflage:/opt/ocserv-vps/camouflage:ro", control_block)
         self.assertIn("- ./config:/etc/ocserv:ro", control_block)
         self.assertIn("- /etc/letsencrypt:/etc/letsencrypt:ro", control_block)
         self.assertIn("source: ${OCSERV_UI_ACTION_DIR}", control_block)
@@ -219,6 +220,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("restore_previous", remote)
         self.assertIn("ensure_vpn_journal_config", remote)
         self.assertIn("render_compose_file", remote)
+        self.assertIn("- ./camouflage:/opt/ocserv-vps/camouflage:ro", remote)
         self.assertIn("OCSERV_UI_LOCAL_HOST=${UI_LOCAL_HOST}", remote)
         self.assertIn("OCSERV_UI_VPN_DOMAIN=${DOMAIN}", remote)
         self.assertIn("install_ocserv_restart_bridge", remote)
@@ -228,7 +230,7 @@ class InstallComposeContractTests(unittest.TestCase):
     def test_navigation_refreshes_server_backed_views(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         app = (repository / "ui" / "web" / "app" / "static" / "app.js").read_text(encoding="utf-8")
-        for call in ("loadOverview(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)", "loadConfiguration(true)"):
+        for call in ("loadOverview(true)", "loadCamouflage(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)", "loadConfiguration(true)"):
             self.assertIn(call, app)
 
     def test_configuration_editor_is_read_only_by_default_and_validated_before_restart(self) -> None:

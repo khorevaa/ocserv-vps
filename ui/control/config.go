@@ -15,6 +15,7 @@ type config struct {
 	StatePath            string
 	PasswordPath         string
 	ConfigPath           string
+	CamouflageSourcePath string
 	CertificatePath      string
 	JournalPath          string
 	OCCTLSocket          string
@@ -39,6 +40,7 @@ func defaultConfig() config {
 		StatePath:            "/opt/ocserv-vps/ui-public/state",
 		PasswordPath:         "/opt/ocserv-vps/config/ocpasswd",
 		ConfigPath:           "/opt/ocserv-vps/config/ocserv.conf",
+		CamouflageSourcePath: "/opt/ocserv-vps/camouflage/site/.ocserv-vps-source",
 		CertificatePath:      "/opt/ocserv-vps/ui-public/fullchain.pem",
 		JournalPath:          "/opt/ocserv-vps/logs/vpn-events.jsonl",
 		OCCTLSocket:          "/run/ocserv-control/occtl.sock",
@@ -69,6 +71,7 @@ func configFromEnvironment() (config, error) {
 	cfg.StatePath = path("OCSERV_UI_STATE_FILE", cfg.StatePath)
 	cfg.PasswordPath = path("OCSERV_UI_OCPASSWD_FILE", cfg.PasswordPath)
 	cfg.ConfigPath = path("OCSERV_UI_CONFIG_FILE", cfg.ConfigPath)
+	cfg.CamouflageSourcePath = path("OCSERV_UI_CAMOUFLAGE_SOURCE_FILE", cfg.CamouflageSourcePath)
 	cfg.CertificatePath = path("OCSERV_UI_CERTIFICATE_FILE", cfg.CertificatePath)
 	cfg.JournalPath = path("OCSERV_UI_JOURNAL_FILE", cfg.JournalPath)
 	cfg.OCCTLSocket = path("OCSERV_UI_OCCTL_SOCKET", cfg.OCCTLSocket)

@@ -72,6 +72,7 @@ trap on_exit EXIT; trap 'exit 130' HUP INT TERM
 
 ensure_vpn_journal_config
 render_compose_file
+install -d -m 0750 "${OCSERV_CAMOUFLAGE_ROOT}"
 cat > "${OCSERV_UI_ENV_FILE}" <<EOF
 OCSERV_UI_IMAGE=${UI_IMAGE}
 OCSERV_CONTROL_IMAGE=${CONTROL_IMAGE}
@@ -108,6 +109,7 @@ services:
       - ./locks:/opt/ocserv-vps/locks:rw
       - ./ui-public:/opt/ocserv-vps/ui-public:ro
       - ./logs:/opt/ocserv-vps/logs:ro
+      - ./camouflage:/opt/ocserv-vps/camouflage:ro
       - type: bind
         source: ${OCSERV_UI_CONTAINER_LOG_DIR}
         target: ${OCSERV_UI_CONTAINER_LOG_DIR}
