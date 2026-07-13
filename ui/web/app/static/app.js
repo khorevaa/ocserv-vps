@@ -10,6 +10,10 @@
     usersLoaded: false,
     connectionsLoaded: false,
     journalLoaded: false,
+    configurationLoaded: false,
+    configurationEditing: false,
+    configurationContent: "",
+    configurationSHA256: "",
     usersPage: 1,
     connectionsPage: 1,
     journalPage: 1,
@@ -25,7 +29,6 @@
   const el = (id) => document.getElementById(id);
   const bootView = el("boot-view");
   const appView = el("app-view");
-  const logoutButton = el("logout-button");
   const sidebar = el("sidebar");
   const sidebarToggle = el("sidebar-toggle");
   const sidebarBackdrop = el("sidebar-backdrop");
@@ -104,6 +107,12 @@
         backup_too_large: "Файл резервной копии пользователей слишком большой.",
         invalid_import_mode: "Выбран неподдерживаемый режим импорта пользователей.",
         certificate_renewal_unavailable: "Служба перевыпуска сертификата недоступна.",
+        configuration_unavailable: "Управляемая конфигурация ocserv недоступна для чтения.",
+        configuration_changed: "Конфигурация была изменена после загрузки. Обновите страницу и повторите правки.",
+        invalid_configuration: "ocserv отклонил конфигурацию. Проверьте директивы и указанные пути к файлам.",
+        configuration_write_failed: "Не удалось безопасно сохранить конфигурацию ocserv.",
+        restart_unavailable: "Конфигурация не применена: служба перезапуска ocserv недоступна.",
+        rollback_failed: "Не удалось восстановить предыдущую конфигурацию ocserv. Требуется проверка VPS по SSH.",
       }[payload.error];
       if (translated) return translated;
       const value = payload.message || payload.error || payload.detail;
@@ -219,6 +228,10 @@
     state.usersLoaded = false;
     state.connectionsLoaded = false;
     state.journalLoaded = false;
+    state.configurationLoaded = false;
+    state.configurationEditing = false;
+    state.configurationContent = "";
+    state.configurationSHA256 = "";
     state.overviewLoaded = false;
     state.pendingUserBackup = null;
   }
@@ -259,7 +272,7 @@
     setHidden(bootView, true);
     setHidden(appView, false);
     const requestedView = window.location.hash.slice(1);
-    navigateTo(["overview", "connections", "journal", "users"].includes(requestedView) ? requestedView : "overview");
+    navigateTo(["overview", "connections", "journal", "users", "configuration"].includes(requestedView) ? requestedView : "overview");
   }
 
   function handleUnauthorized(error) {
@@ -283,23 +296,8 @@
     }
   }
 
-  logoutButton.addEventListener("click", async () => {
-    setBusy(logoutButton, true);
-    try {
-      await apiRequest("/api/v1/auth/logout", { method: "POST" });
-      clearSession();
-      window.location.replace("/");
-    } catch (error) {
-      if (!handleUnauthorized(error)) {
-        showToast(error.message || "Не удалось завершить сессию.", "danger");
-      }
-    } finally {
-      setBusy(logoutButton, false);
-    }
-  });
-
   function navigateTo(view) {
-    const nextView = ["overview", "connections", "journal", "users"].includes(view) ? view : "overview";
+    const nextView = ["overview", "connections", "journal", "users", "configuration"].includes(view) ? view : "overview";
     state.currentView = nextView;
     document.querySelectorAll("[data-panel]").forEach((panel) => {
       setHidden(panel, panel.dataset.panel !== nextView);
@@ -313,13 +311,14 @@
         link.removeAttribute("aria-current");
       }
     });
-    const titles = { overview: "Состояние системы", connections: "Подключения", journal: "Журнал событий", users: "Пользователи" };
+    const titles = { overview: "Состояние системы", connections: "Подключения", journal: "Журнал событий", users: "Пользователи", configuration: "Конфигурация ocserv" };
     document.title = `${titles[nextView]} — ocserv VPN Server`;
     closeSidebar();
 
     if (nextView === "users") loadUsers(true);
     else if (nextView === "connections") loadConnections(true);
     else if (nextView === "journal") loadJournal(true);
+    else if (nextView === "configuration") loadConfiguration(true);
     else loadOverview(true);
   }
 
@@ -361,6 +360,180 @@
     }
   });
   sidebarBackdrop.addEventListener("click", closeSidebar);
+
+  function configurationByteLength(content) {
+    return new TextEncoder().encode(content).length;
+  }
+
+  function setConfigurationEditing(editing) {
+    const editor = el("configuration-editor");
+    state.configurationEditing = Boolean(editing && state.configurationLoaded);
+    editor.readOnly = !state.configurationEditing;
+    if (!state.configurationEditing && state.configurationLoaded) {
+      editor.value = state.configurationContent;
+    }
+    el("configuration-mode").textContent = state.configurationEditing ? "Редактирование" : "Только просмотр";
+    el("configuration-mode").classList.toggle("configuration-mode--editing", state.configurationEditing);
+    setHidden(el("configuration-edit"), state.configurationEditing);
+    setHidden(el("configuration-upload"), !state.configurationEditing);
+    setHidden(el("configuration-cancel"), !state.configurationEditing);
+    setHidden(el("configuration-save"), !state.configurationEditing);
+    el("configuration-readonly-note").textContent = state.configurationEditing
+      ? "Режим редактирования включён. Изменения попадут на сервер только после проверки и подтверждения перезапуска."
+      : "По умолчанию конфигурация открыта только для просмотра. Нажмите «Редактировать», чтобы изменить или загрузить файл.";
+  }
+
+  function renderConfigurationMetadata(bytes, sha256) {
+    el("configuration-size").textContent = `${Number(bytes).toLocaleString("ru-RU")} байт`;
+    el("configuration-revision").textContent = `SHA-256: ${sha256}`;
+  }
+
+  async function loadConfiguration(force = false) {
+    if (state.configurationLoaded && !force) return;
+    const editor = el("configuration-editor");
+    const editButton = el("configuration-edit");
+    const downloadButton = el("configuration-download");
+    clearInlineError(el("configuration-error"));
+    state.configurationEditing = false;
+    editor.disabled = true;
+    editor.value = "Загрузка конфигурации…";
+    editButton.disabled = true;
+    downloadButton.disabled = true;
+    try {
+      const payload = await apiRequest("/api/v1/configuration");
+      if (!payload || payload.filename !== "ocserv.conf" || typeof payload.content !== "string"
+        || typeof payload.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(payload.sha256)
+        || configurationByteLength(payload.content) !== payload.bytes || payload.bytes < 1 || payload.bytes > 512 * 1024) {
+        throw new ApiError("Сервер вернул некорректную конфигурацию ocserv.", 0, payload);
+      }
+      state.configurationContent = payload.content;
+      state.configurationSHA256 = payload.sha256;
+      state.configurationLoaded = true;
+      editor.value = payload.content;
+      editor.disabled = false;
+      editButton.disabled = false;
+      downloadButton.disabled = false;
+      renderConfigurationMetadata(payload.bytes, payload.sha256);
+      setConfigurationEditing(false);
+    } catch (error) {
+      state.configurationLoaded = false;
+      editor.value = "";
+      if (!handleUnauthorized(error)) {
+        showInlineError(el("configuration-error"), error.message || "Не удалось загрузить конфигурацию ocserv.");
+      }
+    }
+  }
+
+  el("configuration-edit").addEventListener("click", () => {
+    if (!state.configurationLoaded) return;
+    clearInlineError(el("configuration-error"));
+    setConfigurationEditing(true);
+    el("configuration-editor").focus();
+  });
+
+  el("configuration-cancel").addEventListener("click", () => {
+    const changed = el("configuration-editor").value !== state.configurationContent;
+    if (changed && !window.confirm("Отменить несохранённые изменения конфигурации?")) return;
+    clearInlineError(el("configuration-error"));
+    setConfigurationEditing(false);
+  });
+
+  el("configuration-download").addEventListener("click", () => {
+    if (!state.configurationLoaded) return;
+    const link = document.createElement("a");
+    link.href = "/api/v1/configuration/download";
+    link.download = "ocserv.conf";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  });
+
+  el("configuration-upload").addEventListener("click", () => {
+    if (state.configurationEditing) el("configuration-upload-file").click();
+  });
+
+  el("configuration-upload-file").addEventListener("change", async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file || !state.configurationEditing) return;
+    clearInlineError(el("configuration-error"));
+    try {
+      if (file.size < 1 || file.size > 512 * 1024) {
+        throw new Error("Файл конфигурации должен быть размером от 1 байта до 512 КиБ.");
+      }
+      const content = await file.text();
+      if (!content || configurationByteLength(content) > 512 * 1024 || content.includes("\u0000")) {
+        throw new Error("Файл конфигурации пуст, слишком велик или содержит недопустимые данные.");
+      }
+      el("configuration-editor").value = content;
+      showToast(`Файл ${file.name} загружен в редактор. Для применения нажмите «Сохранить и перезапустить».`, "success");
+    } catch (error) {
+      showInlineError(el("configuration-error"), error.message || "Не удалось прочитать файл конфигурации.");
+    }
+  });
+
+  el("configuration-save").addEventListener("click", async () => {
+    if (!state.configurationEditing || !state.configurationLoaded) return;
+    const editor = el("configuration-editor");
+    const content = editor.value;
+    const bytes = configurationByteLength(content);
+    clearInlineError(el("configuration-error"));
+    if (!content || bytes > 512 * 1024 || content.includes("\u0000")) {
+      showInlineError(el("configuration-error"), "Конфигурация должна содержать от 1 байта до 512 КиБ и не содержать нулевых символов.");
+      return;
+    }
+    if (content === state.configurationContent) {
+      setConfigurationEditing(false);
+      showToast("Изменений в конфигурации нет.");
+      return;
+    }
+    if (!window.confirm("Проверить и сохранить новую конфигурацию? ocserv будет перезапущен, активные VPN-подключения прервутся.")) return;
+
+    const saveButton = el("configuration-save");
+    setBusy(saveButton, true);
+    editor.disabled = true;
+    try {
+      const result = await apiRequest("/api/v1/configuration", {
+        method: "PUT",
+        body: { content, previous_sha256: state.configurationSHA256, restart: true },
+      });
+      if (!result || result.saved !== true || result.restarting !== true || typeof result.sha256 !== "string") {
+        throw new ApiError("Сервер не подтвердил сохранение конфигурации.", 0, result);
+      }
+      state.configurationContent = content;
+      state.configurationSHA256 = result.sha256;
+      renderConfigurationMetadata(result.bytes, result.sha256);
+      setConfigurationEditing(false);
+      showToast("Конфигурация сохранена. ocserv перезапускается…", "success");
+      state.overviewLoaded = false;
+      state.connectionsLoaded = false;
+      state.usersLoaded = false;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        try {
+          const overview = await apiRequest("/api/v1/overview");
+          if (isServiceOnline(overview && overview.service && overview.service.status)) {
+            renderOverview(overview);
+            state.overviewLoaded = true;
+            showToast("Новая конфигурация применена, ocserv снова работает.", "success");
+            return;
+          }
+        } catch (_error) { /* ocserv is restarting */ }
+      }
+      showToast("ocserv не вернулся online за 30 секунд. Проверьте состояние сервера по SSH.", "danger");
+    } catch (error) {
+      if (error && error.payload && error.payload.error === "configuration_changed") {
+        state.configurationLoaded = false;
+      }
+      if (!handleUnauthorized(error)) {
+        showInlineError(el("configuration-error"), error.message || "Не удалось применить конфигурацию ocserv.");
+      }
+    } finally {
+      editor.disabled = false;
+      setBusy(saveButton, false);
+    }
+  });
 
   function textOrDash(value) {
     if (value === null || value === undefined || value === "") {

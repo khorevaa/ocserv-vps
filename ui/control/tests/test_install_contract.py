@@ -39,6 +39,8 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("OCSERV_UI_JOURNAL_FILE: /opt/ocserv-vps/logs/vpn-events.jsonl", control_block)
         self.assertIn("OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}", control_block)
         self.assertIn("- ./logs:/opt/ocserv-vps/logs:ro", control_block)
+        self.assertIn("- ./config:/etc/ocserv:ro", control_block)
+        self.assertIn("- /etc/letsencrypt:/etc/letsencrypt:ro", control_block)
         self.assertIn("source: ${OCSERV_UI_ACTION_DIR}", control_block)
         self.assertIn("target: ${OCSERV_UI_ACTION_DIR}", control_block)
 
@@ -157,7 +159,9 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn('"renew_certificate"', control)
         self.assertIn("s.config.CertRenewTrigger", control)
         self.assertIn('path == "/api/v1/certificate/renew"', web)
-        self.assertNotIn("/etc/letsencrypt", installer.split("  ocserv-control:\n", 1)[1].split("\n  ocserv-ui:\n", 1)[0])
+        control_block = installer.split("  ocserv-control:\n", 1)[1].split("\n  ocserv-ui:\n", 1)[0]
+        self.assertIn("- /etc/letsencrypt:/etc/letsencrypt:ro", control_block)
+        self.assertIn("network_mode: none", control_block)
 
     def test_ui_upgrade_is_transactional_and_preserves_access(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
@@ -177,8 +181,48 @@ class InstallComposeContractTests(unittest.TestCase):
     def test_navigation_refreshes_server_backed_views(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         app = (repository / "ui" / "web" / "app" / "static" / "app.js").read_text(encoding="utf-8")
-        for call in ("loadOverview(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)"):
+        for call in ("loadOverview(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)", "loadConfiguration(true)"):
             self.assertIn(call, app)
+
+    def test_configuration_editor_is_read_only_by_default_and_validated_before_restart(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        static = repository / "ui" / "web" / "app" / "static"
+        index = (static / "index.html").read_text(encoding="utf-8")
+        app = (static / "app.js").read_text(encoding="utf-8")
+        web = (repository / "ui" / "web" / "server.go").read_text(encoding="utf-8")
+        web_configuration = (repository / "ui" / "web" / "configuration.go").read_text(encoding="utf-8")
+        control = (repository / "ui" / "control" / "service.go").read_text(encoding="utf-8")
+        control_configuration = (repository / "ui" / "control" / "configuration.go").read_text(encoding="utf-8")
+        control_image = (repository / "ui" / "control" / "Dockerfile").read_text(encoding="utf-8")
+
+        for element_id in (
+            'data-view="configuration"',
+            'id="configuration-editor"',
+            'id="configuration-edit"',
+            'id="configuration-upload"',
+            'id="configuration-download"',
+            'id="configuration-save"',
+        ):
+            self.assertIn(element_id, index)
+        self.assertGreater(index.index('data-view="configuration"'), index.index('data-view="users"'))
+        self.assertIn('id="configuration-editor" class="configuration-editor" readonly disabled', index)
+        self.assertNotIn('id="logout-button"', index)
+        self.assertNotIn('const logoutButton', app)
+        self.assertIn('apiRequest("/api/v1/configuration")', app)
+        self.assertIn('method: "PUT"', app)
+        self.assertIn('previous_sha256', app)
+        self.assertIn('restart: true', app)
+        self.assertIn('path == "/api/v1/configuration"', web)
+        self.assertIn('path == "/api/v1/configuration/download"', web)
+        self.assertIn('requireCSRF', web_configuration)
+        self.assertIn('"read_configuration"', control)
+        self.assertIn('"write_configuration"', control)
+        self.assertIn('configurationSHA256(original)', control_configuration)
+        self.assertIn('"--test-config"', control_configuration)
+        self.assertIn('os.Rename(candidate, s.config.ConfigPath)', control_configuration)
+        self.assertIn('createHostTriggerFile(s.config.RestartTrigger', control_configuration)
+        self.assertIn('cp /usr/local/sbin/ocserv', control_image)
+        self.assertNotIn("docker.sock", control_configuration)
 
     def test_user_backup_and_one_time_connection_profile_are_exposed_safely(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]

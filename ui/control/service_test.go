@@ -26,6 +26,7 @@ type fakeRunner struct {
 	failPassword  bool
 	failReload    bool
 	failTerminate bool
+	failConfig    bool
 	calls         [][]string
 	inputs        []string
 }
@@ -56,10 +57,21 @@ func (f *fakeRunner) Run(argv []string, stdin string) (string, error) {
 		return "", nil
 	}
 	if filepath.Base(argv[0]) == "ocserv" {
-		if !reflect.DeepEqual(argv[1:], []string{"--version"}) {
-			return "", errors.New("unexpected ocserv command: " + strings.Join(argv, " "))
+		if reflect.DeepEqual(argv[1:], []string{"--version"}) {
+			return "OpenConnect VPN Server 1.5.0\nCompiled with: seccomp\n", nil
 		}
-		return "OpenConnect VPN Server 1.5.0\nCompiled with: seccomp\n", nil
+		if f.failConfig {
+			return "", controlFailure(503, "backend_error", "rejected")
+		}
+		if len(argv) != 3 || argv[1] != "--test-config" || !strings.HasPrefix(argv[2], "--config=") {
+			return "", errors.New("unsafe ocserv validation command")
+		}
+		candidate := strings.TrimPrefix(argv[2], "--config=")
+		content, err := os.ReadFile(candidate)
+		if err != nil || len(content) == 0 || strings.Contains(string(content), "reject-this-directive") {
+			return "", controlFailure(503, "backend_error", "rejected")
+		}
+		return "", nil
 	}
 	command := argv[4:]
 	switch {
@@ -94,6 +106,10 @@ func testService(t *testing.T) (*controlService, *fakeRunner, config) {
 	if err := os.WriteFile(password, []byte("alice:*:oldhash\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	configuration := filepath.Join(root, "config", "ocserv.conf")
+	if err := os.WriteFile(configuration, []byte("auth = \"plain[passwd=/etc/ocserv/ocpasswd]\"\ntcp-port = 443\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
 	state := filepath.Join(root, "state")
 	stateBody := strings.Join([]string{
 		"current_version=1.5.0-slim",
@@ -113,6 +129,7 @@ func testService(t *testing.T) (*controlService, *fakeRunner, config) {
 	cfg.AllowedUID = uint32(os.Getuid())
 	cfg.StatePath = state
 	cfg.PasswordPath = password
+	cfg.ConfigPath = configuration
 	cfg.CertificatePath = filepath.Join(root, "fullchain.pem")
 	cfg.JournalPath = filepath.Join(root, "vpn-events.jsonl")
 	cfg.OCCTLSocket = filepath.Join(root, "occtl.sock")
@@ -127,6 +144,61 @@ func testService(t *testing.T) (*controlService, *fakeRunner, config) {
 	cfg.OCServBin = filepath.Join(root, "ocserv")
 	runner := &fakeRunner{passwordPath: password}
 	return newControlService(cfg, runner), runner, cfg
+}
+
+func TestConfigurationReadValidateSaveAndRestart(t *testing.T) {
+	service, runner, cfg := testService(t)
+	loaded, err := service.readConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := loaded["content"].(string)
+	revision := loaded["sha256"].(string)
+	if loaded["filename"] != "ocserv.conf" || revision != configurationSHA256([]byte(original)) {
+		t.Fatalf("unexpected configuration response: %#v", loaded)
+	}
+	updated := original + "max-clients = 96\n"
+	result, err := service.writeConfiguration(updated, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["saved"] != true || result["restarting"] != true || result["sha256"] != configurationSHA256([]byte(updated)) {
+		t.Fatalf("unexpected save response: %#v", result)
+	}
+	content, _ := os.ReadFile(cfg.ConfigPath)
+	if string(content) != updated {
+		t.Fatalf("configuration was not replaced: %q", content)
+	}
+	if _, err = os.Lstat(cfg.RestartTrigger); err != nil {
+		t.Fatalf("restart trigger missing: %v", err)
+	}
+	if len(runner.calls) != 1 || filepath.Base(runner.calls[0][0]) != "ocserv" {
+		t.Fatalf("configuration was not validated by ocserv: %#v", runner.calls)
+	}
+}
+
+func TestConfigurationRejectsInvalidAndStaleContentWithoutMutation(t *testing.T) {
+	service, runner, cfg := testService(t)
+	original, _ := os.ReadFile(cfg.ConfigPath)
+	revision := configurationSHA256(original)
+	if _, err := service.writeConfiguration(string(original)+"max-clients = 80\n", strings.Repeat("0", 64)); err == nil {
+		t.Fatal("stale configuration revision was accepted")
+	} else {
+		assertControlError(t, err, 409, "configuration_changed")
+	}
+	runner.failConfig = true
+	if _, err := service.writeConfiguration(string(original)+"reject-this-directive = true\n", revision); err == nil {
+		t.Fatal("invalid configuration was accepted")
+	} else {
+		assertControlError(t, err, 422, "invalid_configuration")
+	}
+	content, _ := os.ReadFile(cfg.ConfigPath)
+	if string(content) != string(original) {
+		t.Fatalf("rejected configuration changed the active file: %q", content)
+	}
+	if _, err := os.Lstat(cfg.RestartTrigger); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("restart was requested for rejected configuration: %v", err)
+	}
 }
 
 func TestConnectionsDisconnectAndVPNJournalAreAllowlisted(t *testing.T) {

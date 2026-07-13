@@ -1543,6 +1543,101 @@ tbody tr:hover {
   margin-top: 10px;
 }
 
+.configuration-note {
+  margin-bottom: 18px;
+  color: var(--text);
+  background: var(--blue-soft);
+  border-color: color-mix(in srgb, var(--blue) 35%, var(--border));
+}
+
+.configuration-card {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--small-shadow);
+}
+
+.configuration-meta,
+.configuration-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 18px;
+  background: var(--surface-muted);
+}
+
+.configuration-meta {
+  border-bottom: 1px solid var(--border);
+}
+
+.configuration-meta > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.configuration-meta strong {
+  color: var(--text-strong);
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+.configuration-meta span:not(.card-label),
+.configuration-footer {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.configuration-mode--editing {
+  color: var(--amber);
+}
+
+.configuration-editor {
+  display: block;
+  width: 100%;
+  min-height: clamp(420px, 58vh, 760px);
+  resize: vertical;
+  padding: 18px;
+  color: var(--text-strong);
+  background: var(--surface);
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  font: 13px/1.55 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.configuration-editor[readonly] {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.configuration-editor:focus:not([readonly]) {
+  box-shadow: inset 0 0 0 2px var(--blue);
+}
+
+.configuration-editor:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.configuration-footer {
+  align-items: flex-start;
+  border-top: 1px solid var(--border);
+}
+
+.configuration-footer code {
+  max-width: 55%;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .toast-region {
   position: fixed;
   z-index: 200;
@@ -1723,6 +1818,16 @@ tbody tr:hover {
   .page-header--users .page-actions {
     width: 100%;
   }
+
+  .configuration-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .configuration-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }
 
 @media (max-width: 520px) {
@@ -1814,6 +1919,18 @@ tbody tr:hover {
 
   .credential-config-actions .button {
     width: 100%;
+  }
+
+  .configuration-actions .button {
+    width: 100%;
+  }
+
+  .configuration-footer {
+    flex-direction: column;
+  }
+
+  .configuration-footer code {
+    max-width: 100%;
   }
 
   .modal-actions .button {

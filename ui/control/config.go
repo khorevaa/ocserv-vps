@@ -14,6 +14,7 @@ type config struct {
 	AllowedUID       uint32
 	StatePath        string
 	PasswordPath     string
+	ConfigPath       string
 	CertificatePath  string
 	JournalPath      string
 	OCCTLSocket      string
@@ -32,6 +33,7 @@ func defaultConfig() config {
 		AllowedUID:       10001,
 		StatePath:        "/opt/ocserv-vps/ui-public/state",
 		PasswordPath:     "/opt/ocserv-vps/config/ocpasswd",
+		ConfigPath:       "/opt/ocserv-vps/config/ocserv.conf",
 		CertificatePath:  "/opt/ocserv-vps/ui-public/fullchain.pem",
 		JournalPath:      "/opt/ocserv-vps/logs/vpn-events.jsonl",
 		OCCTLSocket:      "/run/ocserv-control/occtl.sock",
@@ -56,6 +58,7 @@ func configFromEnvironment() (config, error) {
 	cfg.SocketPath = path("OCSERV_UI_CONTROL_SOCKET", cfg.SocketPath)
 	cfg.StatePath = path("OCSERV_UI_STATE_FILE", cfg.StatePath)
 	cfg.PasswordPath = path("OCSERV_UI_OCPASSWD_FILE", cfg.PasswordPath)
+	cfg.ConfigPath = path("OCSERV_UI_CONFIG_FILE", cfg.ConfigPath)
 	cfg.CertificatePath = path("OCSERV_UI_CERTIFICATE_FILE", cfg.CertificatePath)
 	cfg.JournalPath = path("OCSERV_UI_JOURNAL_FILE", cfg.JournalPath)
 	cfg.OCCTLSocket = path("OCSERV_UI_OCCTL_SOCKET", cfg.OCCTLSocket)

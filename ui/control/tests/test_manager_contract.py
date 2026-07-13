@@ -59,7 +59,7 @@ class ManagerContractTests(unittest.TestCase):
         server_workflow = (self.repository / ".github" / "workflows" / "publish-ocserv-image.yml").read_text(encoding="utf-8")
 
         self.assertIn("'1.5.0-slim' OCSERV_VERSION", self.manager)
-        self.assertIn("'0.4.15' OCSERV_UI_VERSION", self.manager)
+        self.assertIn("'0.4.16' OCSERV_UI_VERSION", self.manager)
         self.assertIn('for expected_ocserv_image in "$@"', common)
         self.assertIn('require_ui_control_compatibility "${NEW_IMAGE}" "${OLD_IMAGE}"', deploy)
         self.assertIn('require_ui_control_compatibility "${TARGET_IMAGE}" "${OLD_IMAGE}"', rollback)
