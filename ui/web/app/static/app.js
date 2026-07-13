@@ -1155,7 +1155,15 @@
       state.containerLogsLoaded = true;
       renderContainerLogs();
     } catch (error) {
+      state.containerLogs = [];
+      state.containerLogsLoaded = false;
+      state.containerLogsTotal = 0;
+      state.containerLogsTotalPages = 1;
+      state.containerLogsCapturedAt = "";
+      containerLogsTableBody.replaceChildren();
+      containerLogsTableBody.closest(".table-scroll").classList.add("is-empty");
       setHidden(el("logs-loading"), true);
+      setHidden(el("logs-empty"), true);
       if (!handleUnauthorized(error)) showInlineError(el("logs-error"), error.message || "Не удалось загрузить логи сервера.");
     } finally {
       setBusy(refreshButton, false);

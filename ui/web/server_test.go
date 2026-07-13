@@ -17,6 +17,25 @@ import (
 
 const testOrigin = "http://ocserv-0123456789abcdef0123456789abcdef.localhost:8765"
 
+func TestContainerLogsForWebNormalizesNullEntries(t *testing.T) {
+	raw := json.RawMessage(`{"entries":null,"page":1,"page_size":25,"total":0,"total_pages":1,"sort":"desc","source":"ui","captured_at":"2026-07-13T12:35:00Z"}`)
+	result, err := containerLogsForWeb(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, ok := result.(containerLogsWebResponse)
+	if !ok || response.Entries == nil || len(response.Entries) != 0 {
+		t.Fatalf("null entries were not normalized: %#v", result)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"entries":[]`) {
+		t.Fatalf("empty entries must be a JSON array: %s", encoded)
+	}
+}
+
 func writeTestSecret(t *testing.T, path, value string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {

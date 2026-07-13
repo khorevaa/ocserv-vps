@@ -153,6 +153,9 @@ func containerLogsForWeb(raw json.RawMessage) (any, error) {
 	if _, err := time.Parse(time.RFC3339Nano, response.CapturedAt); err != nil {
 		return nil, fmt.Errorf("invalid control response")
 	}
+	if response.Entries == nil {
+		response.Entries = []containerLogWebEntry{}
+	}
 	for _, entry := range response.Entries {
 		if (entry.Source != "server" && entry.Source != "control" && entry.Source != "ui") ||
 			(response.Source != "all" && entry.Source != response.Source) || len(entry.Message) > 4099 || !utf8.ValidString(entry.Message) {

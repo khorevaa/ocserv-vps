@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,33 @@ import (
 	"testing"
 	"time"
 )
+
+func TestEmptyContainerLogPageSerializesEntriesAsArray(t *testing.T) {
+	root := t.TempDir()
+	cfg := defaultConfig()
+	cfg.ContainerLogDir = root
+	cfg.ContainerLogLock = filepath.Join(root, "container-logs.lock")
+	cfg.AllowedUID = uint32(os.Getegid())
+	path := filepath.Join(root, "ui.log")
+	if err := os.WriteFile(path, nil, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := newControlService(cfg, &fakeRunner{}).listContainerLogs("ui", 1, 25, "desc", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"entries":[]`) {
+		t.Fatalf("empty entries must be a JSON array: %s", encoded)
+	}
+}
 
 func TestContainerLogsAreSortedAndPaginatedOnTheServer(t *testing.T) {
 	root := t.TempDir()
