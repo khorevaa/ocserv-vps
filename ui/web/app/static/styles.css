@@ -1374,8 +1374,10 @@ tbody tr:hover {
 }
 
 .modal-note--warning {
-  color: #83510a;
+  color: var(--amber);
   background: var(--amber-soft);
+  border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
+  font-weight: 600;
 }
 
 .modal-actions {
@@ -1408,8 +1410,9 @@ tbody tr:hover {
   gap: 13px;
   margin-bottom: 22px;
   padding: 14px;
-  color: #83510a;
+  color: var(--amber);
   background: var(--amber-soft);
+  border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
   border-radius: 8px;
 }
 

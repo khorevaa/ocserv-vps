@@ -290,6 +290,18 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("VPN password: %s", bootstrap)
         self.assertIn('"${GENERATED_VPN_PASSWORD}"', bootstrap)
 
+    def test_warning_panels_use_theme_aware_high_contrast_colors(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        styles = (repository / "ui" / "web" / "app" / "static" / "styles.css").read_text(
+            encoding="utf-8"
+        )
+        for selector in (".modal-note--warning", ".one-time-warning"):
+            block = styles.split(f"{selector} {{", 1)[1].split("}", 1)[0]
+            self.assertIn("color: var(--amber);", block)
+            self.assertIn("background: var(--amber-soft);", block)
+            self.assertIn("border: 1px solid", block)
+        self.assertNotIn("#83510a", styles)
+
     def test_controller_tunnel_helpers_use_exact_installed_url(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         shell_helper = (repository / "helpers" / "ui-tunnel.sh").read_text(
