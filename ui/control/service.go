@@ -84,6 +84,7 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		"import_users":          {"request_id": true, "action": true, "backup": true, "mode": true},
 		"list_connections":      {"request_id": true, "action": true},
 		"list_journal":          {"request_id": true, "action": true},
+		"list_container_logs":   {"request_id": true, "action": true, "source": true, "page": true, "page_size": true, "sort": true, "refresh": true},
 		"read_configuration":    {"request_id": true, "action": true},
 		"write_configuration":   {"request_id": true, "action": true, "content": true, "previous_sha256": true},
 		"disconnect_connection": {"request_id": true, "action": true, "id": true},
@@ -124,6 +125,16 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		return s.listConnections()
 	case "list_journal":
 		return s.listJournal()
+	case "list_container_logs":
+		source, sourceOK := request["source"].(string)
+		order, orderOK := request["sort"].(string)
+		refresh, refreshOK := request["refresh"].(bool)
+		page := safePositiveInt(request["page"])
+		pageSize := safePositiveInt(request["page_size"])
+		if !sourceOK || !orderOK || !refreshOK || page == 0 || pageSize == 0 {
+			return nil, controlFailure(400, "invalid_container_logs_request", "The container-log request is invalid.")
+		}
+		return s.listContainerLogs(source, page, pageSize, order, refresh)
 	case "read_configuration":
 		return s.readConfiguration()
 	case "write_configuration":

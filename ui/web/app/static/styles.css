@@ -1244,7 +1244,8 @@ tbody tr:hover {
 }
 
 .connections-table,
-.journal-table {
+.journal-table,
+.container-logs-table {
   min-width: 940px;
 }
 
@@ -1260,9 +1261,55 @@ tbody tr:hover {
 .journal-table th:nth-child(4) { width: 16%; }
 .journal-table th:nth-child(5) { width: 15%; }
 .journal-table th:nth-child(6) { width: 21%; }
+.container-logs-table th:nth-child(1) { width: 21%; }
+.container-logs-table th:nth-child(2) { width: 15%; }
+.container-logs-table th:nth-child(3) { width: 64%; }
 
 .journal-toolbar {
   justify-content: flex-start;
+}
+
+.logs-toolbar {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+}
+
+.logs-toolbar .select-field {
+  flex: 0 1 auto;
+}
+
+.log-source-badge {
+  display: inline-flex;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.log-source-badge--server {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.log-source-badge--control {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.log-source-badge--ui {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.container-log-message {
+  display: block;
+  color: var(--text);
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .select-field {
@@ -1849,6 +1896,18 @@ tbody tr:hover {
 
   .page-header > .button span {
     display: none;
+  }
+
+  .logs-toolbar .select-field {
+    align-items: stretch;
+    flex: 1 1 100%;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .logs-toolbar .select-field select {
+    width: 100%;
+    min-width: 0;
   }
 
   .page-header--users > .button span {

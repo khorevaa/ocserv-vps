@@ -85,12 +85,33 @@ printf 'Unix socket: %s (10001:10001 mode 0600); container health: healthy\n' "$
   die 'The fixed ocserv action directory is missing or unsafe.'
 [[ "$(stat -c '%u:%g %a' "${OCSERV_UI_ACTION_DIR}")" == "0:${OCSERV_UI_HOST_GID} 770" ]] || \
   die 'The fixed ocserv action directory has unexpected ownership or permissions.'
+[[ -f "${OCSERV_UI_ACTION_TMPFILES_FILE}" && ! -L "${OCSERV_UI_ACTION_TMPFILES_FILE}" && \
+   "$(stat -c '%u:%g %a' "${OCSERV_UI_ACTION_TMPFILES_FILE}")" == '0:0 644' ]] || \
+  die 'The fixed action tmpfiles rule is missing or unsafe.'
+EXPECTED_ACTION_TMPFILES="$(printf 'd %s 0770 root %s -\nd %s 0750 root %s -' \
+  "${OCSERV_UI_ACTION_DIR}" "${OCSERV_UI_HOST_GID}" \
+  "${OCSERV_UI_CONTAINER_LOG_DIR}" "${OCSERV_UI_HOST_GID}")"
+[[ "$(<"${OCSERV_UI_ACTION_TMPFILES_FILE}")" == "${EXPECTED_ACTION_TMPFILES}" ]] || \
+  die 'The fixed action tmpfiles rule has unexpected content.'
 for unit in "${OCSERV_UI_RESTART_PATH_UNIT}" "${OCSERV_UI_RESTART_SERVICE_UNIT}"; do
   [[ -f "${unit}" && ! -L "${unit}" && "$(stat -c '%u:%g %a' "${unit}")" == '0:0 644' ]] || \
     die "The fixed ocserv restart unit is missing or unsafe: ${unit}"
 done
 systemctl is-active --quiet ocserv-vps-restart.path || die 'The fixed ocserv restart path unit is not active.'
 printf '%s\n' 'Restart bridge: fixed host-side action, active; Docker socket is not mounted'
+[[ -d "${OCSERV_UI_CONTAINER_LOG_DIR}" && ! -L "${OCSERV_UI_CONTAINER_LOG_DIR}" && \
+   "$(stat -c '%u:%g %a' "${OCSERV_UI_CONTAINER_LOG_DIR}")" == "0:${OCSERV_UI_HOST_GID} 750" ]] || \
+  die 'The container-log snapshot directory is missing or unsafe.'
+for unit in "${OCSERV_UI_CONTAINER_LOG_PATH_UNIT}" "${OCSERV_UI_CONTAINER_LOG_SERVICE_UNIT}"; do
+  [[ -f "${unit}" && ! -L "${unit}" && "$(stat -c '%u:%g %a' "${unit}")" == '0:0 644' ]] || \
+    die "The container-log snapshot unit is missing or unsafe: ${unit}"
+done
+[[ -f "${OCSERV_UI_CONTAINER_LOG_SCRIPT}" && ! -L "${OCSERV_UI_CONTAINER_LOG_SCRIPT}" && \
+   "$(stat -c '%u:%g %a' "${OCSERV_UI_CONTAINER_LOG_SCRIPT}")" == '0:0 750' ]] || \
+  die 'The container-log snapshot helper is missing or unsafe.'
+systemctl is-active --quiet ocserv-vps-container-logs.path || \
+  die 'The container-log snapshot path unit is not active.'
+printf '%s\n' 'Container logs: fixed bounded host-side snapshots for server/control/ui; Docker socket is not mounted'
 for unit in "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}"; do
   [[ -f "${unit}" && ! -L "${unit}" && "$(stat -c '%u:%g %a' "${unit}")" == '0:0 644' ]] || \
     die "The fixed certificate renewal unit is missing or unsafe: ${unit}"

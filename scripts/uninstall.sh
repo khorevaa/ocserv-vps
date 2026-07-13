@@ -37,23 +37,46 @@ fi
 systemctl disable --now ocserv-vps-network.service >/dev/null 2>&1 || true
 systemctl disable --now ocserv-vps-restart.path >/dev/null 2>&1 || true
 systemctl stop ocserv-vps-restart.service >/dev/null 2>&1 || true
+systemctl disable --now ocserv-vps-container-logs.path >/dev/null 2>&1 || true
+systemctl stop ocserv-vps-container-logs.service >/dev/null 2>&1 || true
 systemctl disable --now ocserv-vps-certificate-renew.path >/dev/null 2>&1 || true
 systemctl stop ocserv-vps-certificate-renew.service >/dev/null 2>&1 || true
 rm -f \
   "${OCSERV_NETWORK_SERVICE}" \
   "${OCSERV_UI_RESTART_PATH_UNIT}" \
   "${OCSERV_UI_RESTART_SERVICE_UNIT}" \
+  "${OCSERV_UI_CONTAINER_LOG_PATH_UNIT}" \
+  "${OCSERV_UI_CONTAINER_LOG_SERVICE_UNIT}" \
+  "${OCSERV_UI_CONTAINER_LOG_SCRIPT}" \
   "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" \
   "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}" \
   "${OCSERV_UI_CERT_RENEW_SCRIPT}" \
   "${OCSERV_UI_CERT_SYNC_SCRIPT}" \
   "${OCSERV_UI_CERT_DEPLOY_HOOK}" \
-  "${OCSERV_UI_CERT_RENEW_TRIGGER}" \
   "${OCSERV_UI_ACTION_TMPFILES_FILE}" \
   "${OCSERV_UI_TMPFILES_FILE}" \
   "${OCSERV_UI_ACCESS_INFO_SCRIPT}" \
   /etc/sysctl.d/99-ocserv-vps.conf
 systemctl daemon-reload >/dev/null 2>&1 || true
+if [[ -L "${OCSERV_UI_CONTAINER_LOG_DIR}" ]]; then
+  warn 'Refusing to follow a symlink at the container-log snapshot path during uninstall.'
+elif [[ -d "${OCSERV_UI_CONTAINER_LOG_DIR}" ]]; then
+  rm -f \
+    "${OCSERV_UI_CONTAINER_LOG_DIR}/server.log" \
+    "${OCSERV_UI_CONTAINER_LOG_DIR}/control.log" \
+    "${OCSERV_UI_CONTAINER_LOG_DIR}/ui.log"
+  rmdir "${OCSERV_UI_CONTAINER_LOG_DIR}" >/dev/null 2>&1 || true
+fi
+if [[ -L "${OCSERV_UI_ACTION_DIR}" ]]; then
+  warn 'Refusing to follow a symlink at the ocserv action path during uninstall.'
+elif [[ -d "${OCSERV_UI_ACTION_DIR}" ]]; then
+  rm -f \
+    "${OCSERV_UI_RESTART_TRIGGER}" \
+    "${OCSERV_UI_CERT_RENEW_TRIGGER}" \
+    "${OCSERV_UI_CONTAINER_LOG_TRIGGER}" \
+    "${OCSERV_UI_CONTAINER_LOG_RESPONSE}"
+  rmdir "${OCSERV_UI_ACTION_DIR}" >/dev/null 2>&1 || true
+fi
 
 remove_jump() {
   local table="$1" chain="$2" target="$3"
@@ -88,6 +111,7 @@ if [[ "${PURGE_DATA}" == 1 ]]; then
     "${OCSERV_STACK_ROOT}" \
     "${OCSERV_BACKUP_ROOT}" \
     "${OCSERV_UI_WEB_RUN_DIR}" \
+    "${OCSERV_UI_CONTAINER_LOG_DIR}" \
     "${OCSERV_UI_ACTION_DIR}"
   rm -f \
     /root/ocserv-vps-ui-access \

@@ -94,6 +94,9 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       OCSERV_UI_ALLOWED_UID: "10001"
+      OCSERV_UI_CONTAINER_LOG_DIR: ${OCSERV_UI_CONTAINER_LOG_DIR}
+      OCSERV_UI_CONTAINER_LOG_TRIGGER: ${OCSERV_UI_CONTAINER_LOG_TRIGGER}
+      OCSERV_UI_CONTAINER_LOG_RESPONSE: ${OCSERV_UI_CONTAINER_LOG_RESPONSE}
       OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}
       OCSERV_UI_CERTIFICATE_FILE: /opt/ocserv-vps/ui-public/fullchain.pem
       OCSERV_UI_STATE_FILE: /opt/ocserv-vps/ui-public/state
@@ -105,6 +108,11 @@ services:
       - ./locks:/opt/ocserv-vps/locks:rw
       - ./ui-public:/opt/ocserv-vps/ui-public:ro
       - ./logs:/opt/ocserv-vps/logs:ro
+      - type: bind
+        source: ${OCSERV_UI_CONTAINER_LOG_DIR}
+        target: ${OCSERV_UI_CONTAINER_LOG_DIR}
+        read_only: true
+        bind: {create_host_path: false}
       - type: bind
         source: ${OCSERV_UI_ACTION_DIR}
         target: ${OCSERV_UI_ACTION_DIR}
@@ -154,6 +162,7 @@ volumes:
 EOF
 chmod 0640 "${OCSERV_UI_COMPOSE_FILE}"
 install_ocserv_restart_bridge
+install_container_log_snapshot_bridge
 install_certificate_renewal_bridge
 render_ui_access_info_script
 compose up -d --remove-orphans

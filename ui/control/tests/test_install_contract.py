@@ -130,6 +130,53 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("PathExists=${OCSERV_UI_RESTART_TRIGGER}", common)
         self.assertIn("ExecStart=${docker_bin} restart --timeout 10 ${OCSERV_CONTAINER}", common)
 
+    def test_container_logs_use_a_bounded_fixed_host_snapshot_bridge(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        installer = (repository / "scripts" / "install-ui.sh").read_text(encoding="utf-8")
+        upgrader = (repository / "scripts" / "upgrade-ui.sh").read_text(encoding="utf-8")
+        uninstaller = (repository / "scripts" / "uninstall.sh").read_text(encoding="utf-8")
+        status = (repository / "scripts" / "ui-status.sh").read_text(encoding="utf-8")
+        control = (repository / "ui" / "control" / "service.go").read_text(encoding="utf-8")
+        container_logs = (repository / "ui" / "control" / "container_logs.go").read_text(encoding="utf-8")
+        web = (repository / "ui" / "web" / "server.go").read_text(encoding="utf-8")
+        index = (repository / "ui" / "web" / "app" / "static" / "index.html").read_text(encoding="utf-8")
+        app = (repository / "ui" / "web" / "app" / "static" / "app.js").read_text(encoding="utf-8")
+
+        for contract in (
+            'OCSERV_UI_CONTAINER_LOG_DIR="/run/ocserv-vps-container-logs"',
+            "install_container_log_snapshot_bridge()",
+            "PathExists=${OCSERV_UI_CONTAINER_LOG_TRIGGER}",
+            "ExecStart=${OCSERV_UI_CONTAINER_LOG_SCRIPT}",
+            '${docker_bin} logs --timestamps --tail 2000 "\\${container}"',
+            "server) container='ocserv-vps'",
+            "control) container='ocserv-vps-control'",
+            "ui) container='ocserv-vps-ui'",
+            "tail_bin} -c 4194304",
+        ):
+            self.assertIn(contract, common)
+        self.assertNotIn("docker.sock", common)
+        self.assertIn("install_container_log_snapshot_bridge", installer)
+        self.assertIn("install_container_log_snapshot_bridge", upgrader)
+        self.assertIn("OCSERV_UI_CONTAINER_LOG_DIR", installer)
+        self.assertIn("read_only: true", installer)
+        self.assertIn('"${OCSERV_UI_CONTAINER_LOG_SERVICE_UNIT}"', uninstaller)
+        self.assertIn("ocserv-vps-container-logs.path", status)
+        self.assertIn('"list_container_logs"', control)
+        self.assertIn("func (s *controlService) listContainerLogs", container_logs)
+        self.assertIn('path == "/api/v1/container-logs"', web)
+        self.assertIn('data-view="logs"', index)
+        for element_id in (
+            'id="logs-source"',
+            'id="logs-sort"',
+            'id="logs-page-size"',
+            'id="logs-prev"',
+            'id="logs-next"',
+        ):
+            self.assertIn(element_id, index)
+        self.assertIn("URLSearchParams", app)
+        self.assertIn("/api/v1/container-logs?", app)
+
     def test_certificate_renewal_uses_a_fixed_host_bridge(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")

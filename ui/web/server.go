@@ -144,6 +144,8 @@ func (a *application) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		a.disconnectConnection(writer, request, context)
 	case path == "/api/v1/journal" && request.Method == http.MethodGet:
 		a.listJournal(writer)
+	case path == "/api/v1/container-logs" && request.Method == http.MethodGet:
+		a.listContainerLogs(writer, request)
 	case path == "/api/v1/users" && request.Method == http.MethodPost:
 		a.addUser(writer, request, context)
 	case strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/password") && request.Method == http.MethodPut:
@@ -442,6 +444,62 @@ func (a *application) listConnections(writer http.ResponseWriter) {
 func (a *application) listJournal(writer http.ResponseWriter) {
 	raw, err := a.control.request("list_journal", nil)
 	a.controlResponse(writer, raw, err, nil)
+}
+
+func (a *application) listContainerLogs(writer http.ResponseWriter, request *http.Request) {
+	noStore(writer.Header())
+	query := request.URL.Query()
+	allowed := map[string]bool{"source": true, "page": true, "page_size": true, "sort": true, "refresh": true}
+	for key, values := range query {
+		if !allowed[key] || len(values) != 1 {
+			writeJSON(writer, http.StatusUnprocessableEntity, map[string]string{"detail": "invalid container-log query"})
+			return
+		}
+	}
+	source := query.Get("source")
+	if source == "" {
+		source = "all"
+	}
+	order := query.Get("sort")
+	if order == "" {
+		order = "desc"
+	}
+	page, pageSize := 1, 50
+	var err error
+	if value := query.Get("page"); value != "" {
+		page, err = strconv.Atoi(value)
+		if err != nil {
+			page = 0
+		}
+	}
+	if value := query.Get("page_size"); value != "" {
+		pageSize, err = strconv.Atoi(value)
+		if err != nil {
+			pageSize = 0
+		}
+	}
+	refresh := false
+	if value := query.Get("refresh"); value != "" {
+		if value != "true" && value != "false" {
+			writeJSON(writer, http.StatusUnprocessableEntity, map[string]string{"detail": "invalid container-log query"})
+			return
+		}
+		refresh = value == "true"
+	}
+	if !validContainerLogQuery(source, page, pageSize, order) {
+		writeJSON(writer, http.StatusUnprocessableEntity, map[string]string{"detail": "invalid container-log query"})
+		return
+	}
+	raw, controlErr := a.control.request("list_container_logs", map[string]any{
+		"source": source, "page": page, "page_size": pageSize, "sort": order, "refresh": refresh,
+	})
+	a.controlResponse(writer, raw, controlErr, containerLogsForWeb)
+}
+
+func validContainerLogQuery(source string, page, pageSize int, order string) bool {
+	validSource := source == "all" || source == "server" || source == "control" || source == "ui"
+	validPageSize := pageSize == 25 || pageSize == 50 || pageSize == 100
+	return validSource && page >= 1 && page <= 10000 && validPageSize && (order == "asc" || order == "desc")
 }
 
 func (a *application) disconnectConnection(writer http.ResponseWriter, request *http.Request, context requestContext) {

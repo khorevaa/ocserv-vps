@@ -83,6 +83,9 @@ for path in \
   "${UI_WEB_RUN_DIR}" "${UI_TMPFILES_FILE}" \
   "${OCSERV_UI_ACTION_TMPFILES_FILE}" \
   "${OCSERV_UI_RESTART_PATH_UNIT}" "${OCSERV_UI_RESTART_SERVICE_UNIT}" \
+  "${OCSERV_UI_CONTAINER_LOG_DIR}" \
+  "${OCSERV_UI_CONTAINER_LOG_PATH_UNIT}" "${OCSERV_UI_CONTAINER_LOG_SERVICE_UNIT}" \
+  "${OCSERV_UI_CONTAINER_LOG_SCRIPT}" \
   "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}" \
   "${OCSERV_UI_CERT_RENEW_SCRIPT}" "${OCSERV_UI_CERT_SYNC_SCRIPT}" \
   "${OCSERV_UI_CERT_DEPLOY_HOOK}" \
@@ -251,26 +254,48 @@ rollback_ui() {
     identity_cleanup_safe=0
   fi
   systemctl disable --now ocserv-vps-restart.path >/dev/null 2>&1 || true
+  systemctl disable --now ocserv-vps-container-logs.path >/dev/null 2>&1 || true
+  systemctl stop ocserv-vps-container-logs.service >/dev/null 2>&1 || true
   systemctl disable --now ocserv-vps-certificate-renew.path >/dev/null 2>&1 || true
   systemctl stop ocserv-vps-certificate-renew.service >/dev/null 2>&1 || true
   if ! rm -f "${OCSERV_UI_RESTART_PATH_UNIT}" "${OCSERV_UI_RESTART_SERVICE_UNIT}" \
+      "${OCSERV_UI_CONTAINER_LOG_PATH_UNIT}" "${OCSERV_UI_CONTAINER_LOG_SERVICE_UNIT}" \
+      "${OCSERV_UI_CONTAINER_LOG_SCRIPT}" \
       "${OCSERV_UI_CERT_RENEW_PATH_UNIT}" "${OCSERV_UI_CERT_RENEW_SERVICE_UNIT}" \
       "${OCSERV_UI_CERT_RENEW_SCRIPT}" "${OCSERV_UI_CERT_SYNC_SCRIPT}" \
-      "${OCSERV_UI_CERT_DEPLOY_HOOK}" "${OCSERV_UI_CERT_RENEW_TRIGGER}" \
-      "${OCSERV_UI_ACTION_TMPFILES_FILE}" "${OCSERV_UI_RESTART_TRIGGER}"; then
+      "${OCSERV_UI_CERT_DEPLOY_HOOK}" \
+      "${OCSERV_UI_ACTION_TMPFILES_FILE}"; then
     warn 'Rollback could not remove all ocserv host action bridges.'
     rollback_failed=1
     identity_cleanup_safe=0
+  fi
+  if [[ -L "${OCSERV_UI_CONTAINER_LOG_DIR}" ]]; then
+    warn 'Rollback refuses to follow a symlink at the container-log snapshot path.'
+    rollback_failed=1
+    identity_cleanup_safe=0
+  elif [[ -d "${OCSERV_UI_CONTAINER_LOG_DIR}" ]]; then
+    if ! rm -f "${OCSERV_UI_CONTAINER_LOG_DIR}/server.log" \
+        "${OCSERV_UI_CONTAINER_LOG_DIR}/control.log" \
+        "${OCSERV_UI_CONTAINER_LOG_DIR}/ui.log" || \
+       ! rmdir "${OCSERV_UI_CONTAINER_LOG_DIR}"; then
+      warn 'Rollback could not remove the container-log snapshot directory.'
+      rollback_failed=1
+      identity_cleanup_safe=0
+    fi
   fi
   systemctl daemon-reload >/dev/null 2>&1 || true
   if [[ -L "${OCSERV_UI_ACTION_DIR}" ]]; then
     warn 'Rollback refuses to follow a symlink at the ocserv action path.'
     rollback_failed=1
     identity_cleanup_safe=0
-  elif [[ -d "${OCSERV_UI_ACTION_DIR}" ]] && ! rmdir "${OCSERV_UI_ACTION_DIR}"; then
-    warn 'Rollback could not remove the ocserv action directory.'
-    rollback_failed=1
-    identity_cleanup_safe=0
+  elif [[ -d "${OCSERV_UI_ACTION_DIR}" ]]; then
+    if ! rm -f "${OCSERV_UI_RESTART_TRIGGER}" "${OCSERV_UI_CERT_RENEW_TRIGGER}" \
+        "${OCSERV_UI_CONTAINER_LOG_TRIGGER}" "${OCSERV_UI_CONTAINER_LOG_RESPONSE}" || \
+       ! rmdir "${OCSERV_UI_ACTION_DIR}"; then
+      warn 'Rollback could not remove the ocserv action directory.'
+      rollback_failed=1
+      identity_cleanup_safe=0
+    fi
   fi
   if ! rm -f "${OCSERV_UI_ACCESS_INFO_SCRIPT}"; then
     warn 'Rollback could not remove the UI access-info command.'
@@ -392,6 +417,7 @@ systemd-tmpfiles --create "${UI_TMPFILES_FILE}"
 [[ "$(stat -c '%u:%g %a' "${UI_WEB_RUN_DIR}")" == '10001:10001 700' ]] || \
   die 'The UI web runtime directory has unexpected ownership or permissions.'
 install_ocserv_restart_bridge
+install_container_log_snapshot_bridge
 install_certificate_renewal_bridge
 SESSION_KEY="$(openssl rand -hex 32)"
 ACCESS_SECRET="$(openssl rand -hex 32)"
@@ -446,6 +472,9 @@ services:
       - no-new-privileges:true
     environment:
       OCSERV_UI_ALLOWED_UID: "10001"
+      OCSERV_UI_CONTAINER_LOG_DIR: ${OCSERV_UI_CONTAINER_LOG_DIR}
+      OCSERV_UI_CONTAINER_LOG_TRIGGER: ${OCSERV_UI_CONTAINER_LOG_TRIGGER}
+      OCSERV_UI_CONTAINER_LOG_RESPONSE: ${OCSERV_UI_CONTAINER_LOG_RESPONSE}
       OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}
       OCSERV_UI_CERTIFICATE_FILE: /opt/ocserv-vps/ui-public/fullchain.pem
       OCSERV_UI_STATE_FILE: /opt/ocserv-vps/ui-public/state
@@ -461,6 +490,12 @@ services:
       - ./locks:/opt/ocserv-vps/locks:rw
       - ./ui-public:/opt/ocserv-vps/ui-public:ro
       - ./logs:/opt/ocserv-vps/logs:ro
+      - type: bind
+        source: ${OCSERV_UI_CONTAINER_LOG_DIR}
+        target: ${OCSERV_UI_CONTAINER_LOG_DIR}
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: ${OCSERV_UI_ACTION_DIR}
         target: ${OCSERV_UI_ACTION_DIR}
