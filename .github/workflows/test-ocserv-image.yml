@@ -1,0 +1,88 @@
+name: Test ocserv image
+
+on:
+  pull_request:
+    paths:
+      - docker/Dockerfile
+      - docker/entrypoint.sh
+      - docker/prepare-context.sh
+      - .github/workflows/test-ocserv-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-24.04
+    env:
+      OCSERV_VERSION: 1.5.0
+      SOURCE_URL: https://www.infradead.org/ocserv/download/ocserv-1.5.0.tar.xz
+      SOURCE_SHA256: 42ced08958b9576ab134fcb7bdc7f8df5e13214fd147855f99021fedcf0eedbe
+      SIGNATURE_URL: https://www.infradead.org/ocserv/download/ocserv-1.5.0.tar.xz.sig
+      SIGNING_KEY_URL: https://ocserv.gitlab.io/www/96865171.asc
+      SIGNING_KEY_FINGERPRINT: 1F42418905D8206AA754CCDC29EE58B996865171
+      BASE_IMAGE: debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+      CANDIDATE_IMAGE: ocserv-vps-server:multistage-test
+      PUBLISHED_IMAGE: ghcr.io/khorevaa/ocserv-vps-server:1.5.0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Verify and prepare ocserv source
+        run: |
+          docker/prepare-context.sh \
+            "${SOURCE_URL}" \
+            "${SOURCE_SHA256}" \
+            "${SIGNATURE_URL}" \
+            "${SIGNING_KEY_URL}" \
+            "${SIGNING_KEY_FINGERPRINT}" \
+            docker/context
+          cp docker/entrypoint.sh docker/context/entrypoint.sh
+
+      - name: Build multi-stage image
+        run: |
+          docker build \
+            --file docker/Dockerfile \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+            --build-arg "OCSERV_VERSION=${OCSERV_VERSION}" \
+            --build-arg "SOURCE_SHA256=${SOURCE_SHA256}" \
+            --tag "${CANDIDATE_IMAGE}" \
+            docker/context
+
+      - name: Smoke-test runtime stage
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /usr/local/sbin/ocserv "${CANDIDATE_IMAGE}" --version
+          docker run --rm --entrypoint /bin/sh "${CANDIDATE_IMAGE}" -ec '
+            ! command -v cc
+            ! command -v gcc
+            ! command -v make
+            ! command -v meson
+            ! command -v ninja
+            test ! -e /usr/src/ocserv
+            ! ldd /usr/local/sbin/ocserv | grep -q "not found"
+            test -x /usr/local/bin/occtl
+            test -x /usr/local/bin/ocpasswd
+          '
+
+      - name: Compare image sizes
+        run: |
+          set -euo pipefail
+          docker pull "${PUBLISHED_IMAGE}"
+          candidate_size="$(docker image inspect "${CANDIDATE_IMAGE}" --format '{{.Size}}')"
+          published_size="$(docker image inspect "${PUBLISHED_IMAGE}" --format '{{.Size}}')"
+          reduction="$((published_size - candidate_size))"
+          reduction_percent="$((reduction * 100 / published_size))"
+          test "${reduction}" -gt 0
+          {
+            echo '## ocserv image size'
+            echo
+            echo '| Image | Uncompressed size |'
+            echo '| --- | ---: |'
+            printf '| Published single-stage | %.1f MiB |\n' "$(awk -v bytes="${published_size}" 'BEGIN {print bytes / 1024 / 1024}')"
+            printf '| Multi-stage candidate | %.1f MiB |\n' "$(awk -v bytes="${candidate_size}" 'BEGIN {print bytes / 1024 / 1024}')"
+            echo
+            echo "Reduction: ${reduction_percent}%"
+          } >> "${GITHUB_STEP_SUMMARY}"
