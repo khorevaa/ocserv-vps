@@ -169,12 +169,12 @@ func TestSecretOnlyFlowAndEmbeddedUI(t *testing.T) {
 	}
 	index := perform(app, "GET", "/", "", cookies[0], "")
 	html := index.Body.String()
-	for _, forbidden := range []string{"login-form", "operator-name", "Управление доступом", ">Обзор<"} {
+	for _, forbidden := range []string{"login-form", "operator-name", "Управление доступом", ">Обзор<", `aria-haspopup="menu"`, `role="menuitemradio"`} {
 		if strings.Contains(html, forbidden) {
 			t.Fatalf("legacy UI artifact remains: %s", forbidden)
 		}
 	}
-	for _, required := range []string{"Состояние системы", "Подключения", "Журнал событий", "Пользователи", "Как в системе", "Тёмная", "Секрет доступа", "Последняя проверка", `aria-haspopup="menu"`, `role="menuitemradio"`} {
+	for _, required := range []string{"Состояние системы", "Подключения", "Журнал событий", "Пользователи", "Тема оформления: как в системе, светлая", "Секрет доступа", "Последняя проверка", `role="switch"`, `aria-checked="false"`, `id="icon-sun"`, `id="icon-moon"`} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("missing UI label %s", required)
 		}

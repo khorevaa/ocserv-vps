@@ -20,6 +20,7 @@ type config struct {
 	OperationLock    string
 	RestartTrigger   string
 	CertRenewTrigger string
+	OCServBin        string
 	OCPasswordBin    string
 	OCCTLBin         string
 	CommandTimeout   time.Duration
@@ -37,6 +38,7 @@ func defaultConfig() config {
 		OperationLock:    "/opt/ocserv-vps/locks/operation.lock",
 		RestartTrigger:   "/run/ocserv-vps-actions/restart-ocserv",
 		CertRenewTrigger: "/run/ocserv-vps-actions/renew-certificate",
+		OCServBin:        "/usr/local/sbin/ocserv",
 		OCPasswordBin:    "/usr/local/bin/ocpasswd",
 		OCCTLBin:         "/usr/local/bin/occtl",
 		CommandTimeout:   8 * time.Second,
@@ -60,6 +62,7 @@ func configFromEnvironment() (config, error) {
 	cfg.OperationLock = path("OCSERV_UI_OPERATION_LOCK", cfg.OperationLock)
 	cfg.RestartTrigger = path("OCSERV_UI_RESTART_TRIGGER", cfg.RestartTrigger)
 	cfg.CertRenewTrigger = path("OCSERV_UI_CERT_RENEW_TRIGGER", cfg.CertRenewTrigger)
+	cfg.OCServBin = path("OCSERV_UI_OCSERV_BIN", cfg.OCServBin)
 	cfg.OCPasswordBin = path("OCSERV_UI_OCPASSWD_BIN", cfg.OCPasswordBin)
 	cfg.OCCTLBin = path("OCSERV_UI_OCCTL_BIN", cfg.OCCTLBin)
 
