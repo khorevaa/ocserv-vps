@@ -149,25 +149,23 @@ prompt_yes_no() {
 prompt_camouflage_site_template() {
   local variable="$1" value
   if [[ ${noninteractive} -eq 1 ]]; then
-    value="${OCSERV_CAMOUFLAGE_SITE_TEMPLATE:-construction}"
+    value="${OCSERV_CAMOUFLAGE_SITE_TEMPLATE:-synology}"
   else
     printf '%s\n' \
       'Camouflage website:' \
-      '  1) Under construction' \
-      '  2) Company landing page' \
-      '  3) Personal blog' \
-      '  4) Service status' \
-      '  5) Download custom static site'
+      '  1) Synology DSM sign-in' \
+      '  2) ownCloud sign-in' \
+      '  3) Remote workspace sign-in' \
+      '  4) Download custom static site'
     read -r -p 'Select a website [1]: ' value
     value="${value:-1}"
   fi
   case "${value,,}" in
-    1 | construction) value='construction' ;;
-    2 | company) value='company' ;;
-    3 | blog) value='blog' ;;
-    4 | status) value='status' ;;
-    5 | custom) value='custom' ;;
-    *) die 'OCSERV_CAMOUFLAGE_SITE_TEMPLATE must be construction, company, blog, status, or custom' ;;
+    1 | synology) value='synology' ;;
+    2 | owncloud) value='owncloud' ;;
+    3 | workspace) value='workspace' ;;
+    4 | custom) value='custom' ;;
+    *) die 'OCSERV_CAMOUFLAGE_SITE_TEMPLATE must be synology, owncloud, workspace, or custom' ;;
   esac
   printf -v "${variable}" '%s' "${value}"
 }
@@ -242,7 +240,6 @@ install_stack() {
     prompt_value camouflage_realm 'Camouflage realm' 'Test Environment' OCSERV_CAMOUFLAGE_REALM
     if prompt_yes_no 'Enable advanced TCP-only website Camouflage?' 0 OCSERV_ADVANCED_CAMOUFLAGE; then
       advanced_camouflage=1
-      prepare_nginx=1
       prompt_camouflage_site_template camouflage_site_template
       if [[ "${camouflage_site_template}" == custom ]]; then
         prompt_value camouflage_site_url 'Direct HTTPS URL of the static-site archive or HTML file' '' OCSERV_CAMOUFLAGE_SITE_URL
@@ -269,9 +266,7 @@ install_stack() {
   fi
   unset OCSERV_CAMOUFLAGE_SECRET OCSERV_CAMOUFLAGE_REALM \
     OCSERV_CAMOUFLAGE_SITE_URL
-  if [[ ${advanced_camouflage} -eq 0 ]]; then
-    prompt_yes_no 'Prepare nginx ACME webroot instead of standalone ACME?' 0 OCSERV_PREPARE_NGINX && prepare_nginx=1
-  fi
+  prompt_yes_no 'Use a host nginx ACME webroot instead of standalone ACME?' 0 OCSERV_PREPARE_NGINX && prepare_nginx=1
   prompt_yes_no 'Install the private management UI?' 1 OCSERV_INSTALL_UI && install_ui=1
   require_approval 'firewall replacement' OCSERV_APPROVE_FIREWALL
   require_approval 'VPN restart and active-session interruption' OCSERV_APPROVE_RESTART
@@ -506,7 +501,7 @@ Set OCSERV_CAMOUFLAGE=1 to enable Camouflage; OCSERV_CAMOUFLAGE_SECRET is
 optional and defaults to a securely generated secret.
 OCSERV_CAMOUFLAGE_REALM defaults to "Test Environment".
 Set OCSERV_ADVANCED_CAMOUFLAGE=1 together with OCSERV_CAMOUFLAGE=1 and
-choose OCSERV_CAMOUFLAGE_SITE_TEMPLATE=construction|company|blog|status|custom
+choose OCSERV_CAMOUFLAGE_SITE_TEMPLATE=synology|owncloud|workspace|custom
 to install TCP-only nginx Camouflage. For custom, set OCSERV_CAMOUFLAGE_SITE_URL
 to a direct HTTPS URL of a ZIP/TAR.GZ archive or HTML file. Advanced mode
 requires public port 443 and disables UDP/DTLS.

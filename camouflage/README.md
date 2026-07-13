@@ -1,6 +1,6 @@
 # Camouflage page prototypes
 
-This directory contains three standalone, dependency-free login-page decoys for a future nginx integration:
+This directory contains three standalone, dependency-free login-page decoys used by the `camouflage-site` nginx container:
 
 - `synology/` — Synology DSM / NAS-style sign-in;
 - `owncloud/` — ownCloud-style sign-in;
@@ -17,7 +17,7 @@ Each preset directory is a complete package with exactly two files:
 - `index.html` contains all HTML, CSS, and JavaScript needed to render the page;
 - `camouflage.json` describes entry paths, read-only requests made on page load, stub responses, and the form request contract.
 
-Characteristic asset and API paths are still requested when the page opens, but they are response contracts rather than physical files. A future nginx integration can translate `camouflage.json` directly into matching locations.
+Characteristic asset and API paths are requested when the page opens, but they are response contracts rather than physical files. During VPS installation, `scripts/render-camouflage-nginx.py` validates the selected `camouflage.json` and translates it into exact local Nginx locations. Only `index.html` is mounted as website content; the contract remains outside the web root.
 
 ## Safety contract
 
@@ -42,7 +42,7 @@ python3 -m http.server 8082 --directory camouflage/workspace
 
 Then open `http://127.0.0.1:<port>/`.
 
-The stock static server will answer characteristic stub paths with `404`; that is expected during visual-only preview. Their intended responses are declared in the preset's `camouflage.json`.
+The stock static server will answer characteristic stub paths with `404`; that is expected during visual-only preview. In an installed stack, those responses are served by the generated Nginx configuration in the `camouflage-site` sidecar.
 
 ## Tests
 

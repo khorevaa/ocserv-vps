@@ -549,12 +549,18 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL", manager)
         self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL", bootstrap)
         self.assertIn("Advanced Camouflage requires public VPN port 443", bootstrap)
-        self.assertIn("libnginx-mod-stream", bootstrap)
+        self.assertNotIn("libnginx-mod-stream", bootstrap)
         self.assertIn('render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 0', bootstrap)
         self.assertIn("install_camouflage_site", bootstrap)
         self.assertIn("render_advanced_camouflage_nginx", bootstrap)
         self.assertIn("verify_advanced_camouflage_site", bootstrap)
         self.assertIn("cover site did not negotiate HTTP/2", common)
+        self.assertIn("pull_camouflage_image", bootstrap)
+        self.assertIn("test_camouflage_image_config", bootstrap)
+        self.assertIn("container_name: camouflage-site", common)
+        self.assertIn("./camouflage/site:/srv/camouflage:ro", common)
+        self.assertIn("./camouflage/nginx.conf:/etc/nginx/nginx.conf:ro", common)
+        self.assertIn("network_mode: host", common)
 
         rendered = common.split("render_ocserv_config() {", 1)[1].split(
             "create_password_user() {", 1
@@ -568,15 +574,17 @@ class InstallComposeContractTests(unittest.TestCase):
         )[0]
         self.assertIn("ssl_preread on", nginx)
         self.assertIn("proxy_protocol on", nginx)
-        self.assertIn("ssl http2 proxy_protocol", nginx)
-        self.assertIn("root ${OCSERV_CAMOUFLAGE_SITE_ROOT}", nginx)
+        self.assertIn("http2 on", nginx)
+        self.assertIn("root ${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT}", nginx)
+        self.assertNotIn("load_module", nginx)
         self.assertIn("try_files \\$uri \\$uri/ /index.html", nginx)
         self.assertIn("$ssl_preread_alpn_protocols", nginx)
         self.assertNotIn("proxy_ssl_", nginx)
         self.assertNotIn("CAMOUFLAGE_DOWNLOAD_URL", nginx)
         self.assertNotIn("proxy_pass https://127.0.0.1", nginx)
         self.assertIn("UDP/DTLS: disabled", status)
-        self.assertIn('"${OCSERV_CAMOUFLAGE_NGINX_STREAM}"', uninstaller)
+        self.assertIn('"${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"', uninstaller)
+        self.assertNotIn("systemctl reload nginx", uninstaller)
 
     def test_bootstrap_prints_generated_initial_vpn_credentials(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]

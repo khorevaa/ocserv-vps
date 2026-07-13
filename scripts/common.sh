@@ -56,15 +56,18 @@ OCSERV_CERT_DEPLOY_HOOK="/etc/letsencrypt/renewal-hooks/deploy/ocserv-vps-reload
 OCSERV_ACME_WEBROOT="/var/www/ocserv-acme"
 OCSERV_ACME_NGINX_SITE="/etc/nginx/sites-available/ocserv-ui-bootstrap.conf"
 OCSERV_ACME_NGINX_LINK="/etc/nginx/sites-enabled/ocserv-ui-bootstrap.conf"
-OCSERV_CAMOUFLAGE_NGINX_SITE="/etc/nginx/sites-available/ocserv-vps-camouflage.conf"
-OCSERV_CAMOUFLAGE_NGINX_LINK="/etc/nginx/sites-enabled/ocserv-vps-camouflage.conf"
-OCSERV_CAMOUFLAGE_NGINX_STREAM="/etc/nginx/modules-enabled/90-ocserv-vps-camouflage-stream.conf"
-OCSERV_NGINX_STREAM_MODULE_CONFIG="/etc/nginx/modules-enabled/50-mod-stream.conf"
 OCSERV_LETSENCRYPT_LIVE_ROOT="/etc/letsencrypt/live"
-OCSERV_CAMOUFLAGE_TEMPLATE_ROOT="${OCSERV_RUNTIME_ROOT}/assets/camouflage-sites"
+OCSERV_CAMOUFLAGE_TEMPLATE_ROOT="${OCSERV_RUNTIME_ROOT}/camouflage"
 OCSERV_CAMOUFLAGE_EXTRACTOR="${OCSERV_RUNTIME_SCRIPTS_DIR}/extract-camouflage-site.py"
-OCSERV_CAMOUFLAGE_SITE_ROOT="/var/www/ocserv-camouflage"
+OCSERV_CAMOUFLAGE_NGINX_RENDERER="${OCSERV_RUNTIME_SCRIPTS_DIR}/render-camouflage-nginx.py"
+OCSERV_CAMOUFLAGE_ROOT="${OCSERV_STACK_ROOT}/camouflage"
+OCSERV_CAMOUFLAGE_SITE_ROOT="${OCSERV_CAMOUFLAGE_ROOT}/site"
 OCSERV_CAMOUFLAGE_SITE_METADATA="${OCSERV_CAMOUFLAGE_SITE_ROOT}/.ocserv-vps-source"
+OCSERV_CAMOUFLAGE_CONTRACT="${OCSERV_CAMOUFLAGE_ROOT}/camouflage.json"
+OCSERV_CAMOUFLAGE_NGINX_CONFIG="${OCSERV_CAMOUFLAGE_ROOT}/nginx.conf"
+OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT="/srv/camouflage"
+OCSERV_CAMOUFLAGE_CONTAINER="camouflage-site"
+OCSERV_CAMOUFLAGE_IMAGE_REFERENCE="docker.io/library/nginx:stable-alpine"
 OCSERV_CAMOUFLAGE_TCP_PORT="8443"
 OCSERV_CAMOUFLAGE_WEB_PORT="8444"
 
@@ -529,8 +532,8 @@ validate_camouflage_realm() {
 
 validate_camouflage_site_template() {
   case "$1" in
-    construction | company | blog | status | custom) ;;
-    *) die 'Camouflage site template must be construction, company, blog, status, or custom.' ;;
+    synology | owncloud | workspace | custom) ;;
+    *) die 'Camouflage site template must be synology, owncloud, workspace, or custom.' ;;
   esac
 }
 
@@ -674,9 +677,19 @@ EOF
 }
 
 write_stack_env() {
-  local temp
+  local temp camouflage_image="${2:-}"
+  if [[ -z "${camouflage_image}" && -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" && \
+        -f "${OCSERV_ENV_FILE}" ]]; then
+    camouflage_image="$(awk -F= '$1 == "OCSERV_CAMOUFLAGE_IMAGE" {print substr($0, index($0, "=") + 1); found++} END {if (found != 1) exit 1}' \
+      "${OCSERV_ENV_FILE}")" || die 'The managed Camouflage image reference is missing or duplicated.'
+  fi
+  if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]]; then
+    [[ "${camouflage_image}" =~ ^(docker\.io/)?(library/)?nginx@sha256:[0-9a-f]{64}$ ]] || \
+      die 'The Camouflage sidecar image must be an immutable official nginx digest.'
+  fi
   temp="$(mktemp "${OCSERV_STACK_ROOT}/stack.env.XXXXXX")"
   printf 'OCSERV_IMAGE=%s\n' "$1" > "${temp}"
+  [[ -z "${camouflage_image}" ]] || printf 'OCSERV_CAMOUFLAGE_IMAGE=%s\n' "${camouflage_image}" >> "${temp}"
   chmod 0640 "${temp}"
   mv -f "${temp}" "${OCSERV_ENV_FILE}"
 }
@@ -725,6 +738,50 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+EOF
+  if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" && \
+        -d "${OCSERV_CAMOUFLAGE_SITE_ROOT}" ]]; then
+    cat >> "${OCSERV_COMPOSE_FILE}" <<'EOF'
+  camouflage-site:
+    image: "${OCSERV_CAMOUFLAGE_IMAGE:?OCSERV_CAMOUFLAGE_IMAGE is required}"
+    container_name: camouflage-site
+    entrypoint: ["nginx"]
+    command: ["-g", "daemon off;"]
+    network_mode: host
+    depends_on:
+      ocserv:
+        condition: service_started
+    volumes:
+      - ./camouflage/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./camouflage/site:/srv/camouflage:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:mode=0755
+      - /var/run:mode=0755
+      - /tmp:mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - KILL
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t && kill -0 $$(cat /var/run/nginx.pid)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+EOF
+  fi
+  cat >> "${OCSERV_COMPOSE_FILE}" <<'EOF'
 volumes:
   ocserv-control-run:
     driver: local
@@ -947,6 +1004,40 @@ EOF
   info "Pulled verified GHCR image ${image}."
 }
 
+pull_camouflage_image() {
+  local reference="${1:-${OCSERV_CAMOUFLAGE_IMAGE_REFERENCE}}" resolved build_flags required_flag
+  [[ "${reference}" == "${OCSERV_CAMOUFLAGE_IMAGE_REFERENCE}" || \
+     "${reference}" =~ ^(docker\.io/)?(library/)?nginx@sha256:[0-9a-f]{64}$ ]] || \
+    die 'Camouflage sidecar image must be the managed official nginx reference or an nginx digest.'
+  docker pull "${reference}"
+  resolved="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+    "${reference}" | awk '/nginx@sha256:/ {print; exit}')"
+  [[ "${resolved}" =~ ^(docker\.io/)?(library/)?nginx@sha256:[0-9a-f]{64}$ ]] || \
+    die 'Could not resolve the Camouflage sidecar to an immutable official nginx digest.'
+  build_flags="$(docker run --rm --network none --entrypoint nginx "${resolved}" -V 2>&1)"
+  grep -Eq '(^|[[:space:]])--with-stream([[:space:]]|$)' <<<"${build_flags}" || \
+    die 'The selected nginx image does not provide the required static stream module.'
+  for required_flag in --with-stream_ssl_preread_module --with-http_v2_module --with-http_realip_module; do
+    grep -q -- "${required_flag}" <<<"${build_flags}" || \
+      die "The selected nginx image does not provide ${required_flag}."
+  done
+  RESOLVED_CAMOUFLAGE_IMAGE="${resolved}"
+  info "Pulled Camouflage sidecar image ${resolved}."
+}
+
+test_camouflage_image_config() {
+  local image="$1"
+  [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" && ! -L "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]] || \
+    die 'The Camouflage nginx configuration is missing or unsafe.'
+  [[ -d "${OCSERV_CAMOUFLAGE_SITE_ROOT}" && ! -L "${OCSERV_CAMOUFLAGE_SITE_ROOT}" ]] || \
+    die 'The Camouflage site mount is missing or unsafe.'
+  docker run --rm --network none --entrypoint nginx \
+    -v "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}:/etc/nginx/nginx.conf:ro" \
+    -v "${OCSERV_CAMOUFLAGE_SITE_ROOT}:${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT}:ro" \
+    -v "/etc/letsencrypt:/etc/letsencrypt:ro" \
+    "${image}" -t -c /etc/nginx/nginx.conf
+}
+
 test_image_config() {
   local image="$1" help_text
   help_text="$(docker run --rm --entrypoint /usr/local/sbin/ocserv "${image}" --help 2>&1 || true)"
@@ -973,6 +1064,7 @@ listener_exists() {
 health_check_stack() {
   local expected_image="$1" vpn_port="$2" timeout_seconds="$3"
   local expected_id actual_id deadline tcp_port udp_port no_udp tcp_ready udp_ready
+  local camouflage_ready camouflage_image camouflage_expected_id camouflage_actual_id camouflage_health
   tcp_port="$(ocserv_config_value tcp-port)"
   udp_port="$(ocserv_config_value udp-port)"
   no_udp="$(ocserv_config_value no-udp false)"
@@ -986,9 +1078,25 @@ health_check_stack() {
       actual_id="$(docker inspect --format '{{.Image}}' "${OCSERV_CONTAINER}" 2>/dev/null || true)"
       tcp_ready=0
       udp_ready=0
+      camouflage_ready=1
       if listener_exists tcp "${tcp_port}" && listener_exists tcp "${vpn_port}"; then tcp_ready=1; fi
       if [[ "${no_udp,,}" == true ]] || listener_exists udp "${udp_port}"; then udp_ready=1; fi
-      if [[ "${actual_id}" == "${expected_id}" && "${tcp_ready}" == 1 && "${udp_ready}" == 1 ]] && \
+      if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]]; then
+        camouflage_ready=0
+        camouflage_image="$(awk -F= '$1 == "OCSERV_CAMOUFLAGE_IMAGE" {print substr($0, index($0, "=") + 1); found++} END {if (found != 1) exit 1}' \
+          "${OCSERV_ENV_FILE}" 2>/dev/null || true)"
+        camouflage_expected_id="$(docker image inspect --format '{{.Id}}' "${camouflage_image}" 2>/dev/null || true)"
+        camouflage_actual_id="$(docker inspect --format '{{.Image}}' "${OCSERV_CAMOUFLAGE_CONTAINER}" 2>/dev/null || true)"
+        camouflage_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+          "${OCSERV_CAMOUFLAGE_CONTAINER}" 2>/dev/null || true)"
+        if [[ -n "${camouflage_expected_id}" && "${camouflage_actual_id}" == "${camouflage_expected_id}" && \
+              "${camouflage_health}" == healthy ]] && \
+           docker exec "${OCSERV_CAMOUFLAGE_CONTAINER}" nginx -t >/dev/null 2>&1; then
+          camouflage_ready=1
+        fi
+      fi
+      if [[ "${actual_id}" == "${expected_id}" && "${tcp_ready}" == 1 && \
+            "${udp_ready}" == 1 && "${camouflage_ready}" == 1 ]] && \
         docker exec "${OCSERV_CONTAINER}" /usr/local/sbin/ocserv --version >/dev/null 2>&1; then
         if [[ "${no_udp,,}" == true ]]; then
           info "Health check passed for ${expected_image}: public TCP ${vpn_port}, local ocserv TCP ${tcp_port}, DTLS disabled."
@@ -1003,6 +1111,10 @@ health_check_stack() {
   warn "Health check failed for ${expected_image}."
   docker inspect "${OCSERV_CONTAINER}" 2>/dev/null | sed -n '1,120p' >&2 || true
   docker logs --tail 100 "${OCSERV_CONTAINER}" >&2 2>&1 || true
+  if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]]; then
+    docker inspect "${OCSERV_CAMOUFLAGE_CONTAINER}" 2>/dev/null | sed -n '1,120p' >&2 || true
+    docker logs --tail 100 "${OCSERV_CAMOUFLAGE_CONTAINER}" >&2 2>&1 || true
+  fi
   return 1
 }
 
@@ -1129,7 +1241,7 @@ EOF
 install_camouflage_site() (
   set -euo pipefail
   local template="$1" download_url="${2:-}" vpn_domain="$3"
-  local stage workdir='' archive='' source_label http_code='' address downloaded=0
+  local stage workdir='' archive='' contract_stage='' source_label http_code='' address downloaded=0
   local -a download_addresses=()
   validate_camouflage_site_template "${template}"
   validate_domain "${vpn_domain}"
@@ -1138,6 +1250,7 @@ install_camouflage_site() (
   cleanup_camouflage_site_install() {
     [[ -z "${stage}" ]] || rm -rf "${stage}"
     [[ -z "${workdir}" ]] || rm -rf "${workdir}"
+    [[ -z "${contract_stage}" ]] || rm -f "${contract_stage}"
   }
   trap cleanup_camouflage_site_install EXIT
 
@@ -1186,10 +1299,20 @@ PY
   else
     [[ -z "${download_url}" ]] || die 'Camouflage download URL is valid only for the custom template.'
     [[ -d "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}" && \
-       -f "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/index.html" ]] || \
+       -f "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/index.html" && \
+       ! -L "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/index.html" && \
+       -f "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/camouflage.json" && \
+       ! -L "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/camouflage.json" ]] || \
       die "Built-in Camouflage site is missing: ${template}"
-    cp -a "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/." "${stage}/"
-    source_label="template:${template}"
+    [[ -f "${OCSERV_CAMOUFLAGE_NGINX_RENDERER}" && \
+       ! -L "${OCSERV_CAMOUFLAGE_NGINX_RENDERER}" ]] || \
+      die 'The Camouflage nginx renderer is missing or unsafe.'
+    install -m 0644 "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/index.html" "${stage}/index.html"
+    contract_stage="$(mktemp "${OCSERV_CAMOUFLAGE_ROOT}/.camouflage-contract.XXXXXX")"
+    install -m 0600 "${OCSERV_CAMOUFLAGE_TEMPLATE_ROOT}/${template}/camouflage.json" "${contract_stage}"
+    python3 "${OCSERV_CAMOUFLAGE_NGINX_RENDERER}" "${contract_stage}" \
+      "${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT}" >/dev/null
+    source_label="preset:${template}"
   fi
 
   [[ -f "${stage}/index.html" && ! -L "${stage}/index.html" ]] || \
@@ -1205,11 +1328,17 @@ PY
   rm -rf "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
   mv "${stage}" "${OCSERV_CAMOUFLAGE_SITE_ROOT}"
   stage=''
+  if [[ "${template}" == custom ]]; then
+    rm -f "${OCSERV_CAMOUFLAGE_CONTRACT}"
+  else
+    mv -f "${contract_stage}" "${OCSERV_CAMOUFLAGE_CONTRACT}"
+    contract_stage=''
+  fi
   info "Installed Camouflage website (${source_label})."
 )
 
 render_advanced_camouflage_nginx() {
-  local domain="$1" vpn_port="$2"
+  local domain="$1" vpn_port="$2" source_label camouflage_locations temporary
   validate_domain "${domain}"
   validate_port 'VPN port' "${vpn_port}"
   [[ "${vpn_port}" == 443 ]] || die 'Advanced Camouflage requires public VPN port 443.'
@@ -1219,43 +1348,77 @@ render_advanced_camouflage_nginx() {
   [[ -f "${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/fullchain.pem" && \
      -f "${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/privkey.pem" ]] || \
     die 'The managed certificate is unavailable for Advanced Camouflage.'
-  [[ -f "${OCSERV_NGINX_STREAM_MODULE_CONFIG}" ]] || \
-    die 'The nginx stream module is not enabled by the distribution package.'
+  [[ -f "${OCSERV_CAMOUFLAGE_SITE_METADATA}" && \
+     ! -L "${OCSERV_CAMOUFLAGE_SITE_METADATA}" ]] || \
+    die 'The Camouflage website metadata is missing or unsafe.'
 
-  install -d -m 0755 \
-    "$(dirname "${OCSERV_CAMOUFLAGE_NGINX_SITE}")" \
-    "$(dirname "${OCSERV_CAMOUFLAGE_NGINX_LINK}")" \
-    "$(dirname "${OCSERV_CAMOUFLAGE_NGINX_STREAM}")"
-  cat > "${OCSERV_CAMOUFLAGE_NGINX_SITE}" <<EOF
-server {
-    listen 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT} ssl http2 proxy_protocol;
-    server_name ${domain};
-
-    ssl_certificate ${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/fullchain.pem;
-    ssl_certificate_key ${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    server_tokens off;
-
-    set_real_ip_from 127.0.0.1;
-    real_ip_header proxy_protocol;
-
+  source_label="$(head -n 1 "${OCSERV_CAMOUFLAGE_SITE_METADATA}")"
+  case "${source_label}" in
+    preset:synology | preset:owncloud | preset:workspace)
+      [[ -f "${OCSERV_CAMOUFLAGE_CONTRACT}" && ! -L "${OCSERV_CAMOUFLAGE_CONTRACT}" ]] || \
+        die 'The selected Camouflage preset contract is missing or unsafe.'
+      [[ -f "${OCSERV_CAMOUFLAGE_NGINX_RENDERER}" && \
+         ! -L "${OCSERV_CAMOUFLAGE_NGINX_RENDERER}" ]] || \
+        die 'The Camouflage nginx renderer is missing or unsafe.'
+      require_command python3
+      camouflage_locations="$(python3 "${OCSERV_CAMOUFLAGE_NGINX_RENDERER}" \
+        "${OCSERV_CAMOUFLAGE_CONTRACT}" "${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT}")"
+      ;;
+    custom-download)
+      camouflage_locations="$(cat <<EOF
     location / {
-        root ${OCSERV_CAMOUFLAGE_SITE_ROOT};
+        root ${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT};
         index index.html;
         try_files \$uri \$uri/ /index.html;
+    }
+EOF
+)"
+      ;;
+    *) die 'The Camouflage website metadata contains an unsupported source.' ;;
+  esac
+
+  install -d -m 0750 "${OCSERV_CAMOUFLAGE_ROOT}"
+  temporary="$(mktemp "${OCSERV_CAMOUFLAGE_ROOT}/.nginx.conf.XXXXXX")"
+  cat > "${temporary}" <<EOF
+user nginx;
+worker_processes auto;
+pid /var/run/nginx.pid;
+error_log /dev/stderr warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log off;
+    sendfile on;
+
+    server {
+        listen 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT} ssl proxy_protocol;
+        http2 on;
+        server_name ${domain};
+
+        ssl_certificate ${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/fullchain.pem;
+        ssl_certificate_key ${OCSERV_LETSENCRYPT_LIVE_ROOT}/${domain}/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        server_tokens off;
+
+        set_real_ip_from 127.0.0.1;
+        real_ip_header proxy_protocol;
+
         add_header X-Content-Type-Options nosniff always;
         add_header Referrer-Policy same-origin always;
-    }
 
-    location ~ (^|/)\\. {
-        deny all;
+${camouflage_locations}
+
+        location ~ (^|/)\\. {
+            deny all;
+        }
     }
 }
-EOF
-  chmod 0644 "${OCSERV_CAMOUFLAGE_NGINX_SITE}"
-  ln -sfn "${OCSERV_CAMOUFLAGE_NGINX_SITE}" "${OCSERV_CAMOUFLAGE_NGINX_LINK}"
 
-  cat > "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" <<EOF
 # Browsers advertising HTTP/2 receive the cover site. AnyConnect/OpenConnect
 # and HTTP/1.1 probes retain end-to-end TLS and are passed to ocserv.
 stream {
@@ -1280,7 +1443,8 @@ stream {
     }
 }
 EOF
-  chmod 0644 "${OCSERV_CAMOUFLAGE_NGINX_STREAM}"
+  chmod 0640 "${temporary}"
+  mv -f "${temporary}" "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
 }
 
 verify_advanced_camouflage_site() {

@@ -37,7 +37,7 @@ CAMOUFLAGE="0"
 CAMOUFLAGE_SECRET="${OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET:-}"
 CAMOUFLAGE_REALM="${OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM:-}"
 ADVANCED_CAMOUFLAGE="0"
-CAMOUFLAGE_SITE_TEMPLATE="construction"
+CAMOUFLAGE_SITE_TEMPLATE="synology"
 CAMOUFLAGE_SITE_URL="${OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL:-}"
 APPROVE_FIREWALL="0"
 APPROVE_RESTART="0"
@@ -99,10 +99,9 @@ if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
     [[ -z "${CAMOUFLAGE_SITE_URL}" ]] || \
       die '--camouflage-site-url requires --camouflage-site-template custom.'
   fi
-  PREPARE_NGINX="1"
 else
   [[ -z "${CAMOUFLAGE_SITE_URL}" ]] || die '--camouflage-site-url requires --advanced-camouflage.'
-  [[ "${CAMOUFLAGE_SITE_TEMPLATE}" == construction ]] || \
+  [[ "${CAMOUFLAGE_SITE_TEMPLATE}" == synology ]] || \
     die '--camouflage-site-template requires --advanced-camouflage.'
 fi
 unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM \
@@ -122,9 +121,6 @@ INSTALL_PACKAGES=(
   ca-certificates curl python3 openssl certbot iproute2 iptables
   openconnect vpnc-scripts
 )
-if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
-  INSTALL_PACKAGES+=(nginx libnginx-mod-stream)
-fi
 apt-get update
 apt-get install -y --no-install-recommends "${INSTALL_PACKAGES[@]}"
 install_docker_engine
@@ -165,9 +161,8 @@ for pair in \
   "${OCSERV_NETWORK_SERVICE}:ocserv-vps-network.service" \
   "${OCSERV_ACME_NGINX_SITE}:nginx-acme-site.conf" \
   "${OCSERV_ACME_NGINX_LINK}:nginx-acme-link.conf" \
-  "${OCSERV_CAMOUFLAGE_NGINX_SITE}:nginx-camouflage-site.conf" \
-  "${OCSERV_CAMOUFLAGE_NGINX_LINK}:nginx-camouflage-link.conf" \
-  "${OCSERV_CAMOUFLAGE_NGINX_STREAM}:nginx-camouflage-stream.conf"; do
+  "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}:nginx-camouflage.conf" \
+  "${OCSERV_CAMOUFLAGE_CONTRACT}:camouflage-contract.json"; do
   original="${pair%%:*}"
   saved="${BOOTSTRAP_BACKUP}/${pair#*:}"
   [[ ! -e "${original}" && ! -L "${original}" ]] || cp -a "${original}" "${saved}"
@@ -196,9 +191,8 @@ rollback_bootstrap() {
     "/etc/sysctl.d/99-ocserv-vps.conf:99-ocserv-vps.conf" \
     "${OCSERV_ACME_NGINX_SITE}:nginx-acme-site.conf" \
     "${OCSERV_ACME_NGINX_LINK}:nginx-acme-link.conf" \
-    "${OCSERV_CAMOUFLAGE_NGINX_SITE}:nginx-camouflage-site.conf" \
-    "${OCSERV_CAMOUFLAGE_NGINX_LINK}:nginx-camouflage-link.conf" \
-    "${OCSERV_CAMOUFLAGE_NGINX_STREAM}:nginx-camouflage-stream.conf"; do
+    "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}:nginx-camouflage.conf" \
+    "${OCSERV_CAMOUFLAGE_CONTRACT}:camouflage-contract.json"; do
     original="${pair%%:*}"
     saved="${BOOTSTRAP_BACKUP}/${pair#*:}"
     if [[ -e "${saved}" || -L "${saved}" ]]; then
@@ -234,12 +228,15 @@ trap 'exit 130' HUP INT TERM
 install -d -m 0750 "${OCSERV_STACK_ROOT}" "${OCSERV_CONFIG_DIR}" "${OCSERV_IMAGE_ROOT}" "${OCSERV_BIN_DIR}"
 pull_verified_image "${IMAGE}" "${VERSION}"
 IMAGE="${RESOLVED_IMAGE}"
+CAMOUFLAGE_IMAGE=''
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  pull_camouflage_image
+  CAMOUFLAGE_IMAGE="${RESOLVED_CAMOUFLAGE_IMAGE}"
+fi
 
 render_ocserv_config "${DOMAIN}" "${VPN_NETWORK}" "${VPN_PORT}" "${DNS_PRIMARY}" "${DNS_SECONDARY}" \
   "${CAMOUFLAGE}" "${CAMOUFLAGE_SECRET}" "${CAMOUFLAGE_REALM}" "${ADVANCED_CAMOUFLAGE}"
 VPN_SERVER_URL="$(ocserv_connection_url "${DOMAIN}" "${VPN_PORT}")"
-render_compose_file
-write_stack_env "${IMAGE}"
 create_password_user "${IMAGE}" "${VPN_USERNAME}"
 # Create the file 0600 before writing so the password is never briefly readable
 # under a group-permissive umask.
@@ -298,9 +295,10 @@ fi
 
 if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
   render_advanced_camouflage_nginx "${DOMAIN}" "${VPN_PORT}"
-  nginx -t
-  systemctl reload nginx
 fi
+
+write_stack_env "${IMAGE}" "${CAMOUFLAGE_IMAGE}"
+render_compose_file
 
 install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
 cat > "${OCSERV_CERT_DEPLOY_HOOK}" <<'EOF'
@@ -309,14 +307,16 @@ set -euo pipefail
 if docker inspect ocserv-vps >/dev/null 2>&1; then
   docker kill --signal HUP ocserv-vps >/dev/null || docker restart ocserv-vps >/dev/null
 fi
-if [[ -f /etc/nginx/modules-enabled/90-ocserv-vps-camouflage-stream.conf ]]; then
-  nginx -t
-  systemctl reload nginx
+if docker inspect camouflage-site >/dev/null 2>&1; then
+  docker kill --signal HUP camouflage-site >/dev/null || docker restart camouflage-site >/dev/null
 fi
 EOF
 chmod 0750 "${OCSERV_CERT_DEPLOY_HOOK}"
 
 test_image_config "${IMAGE}"
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  test_camouflage_image_config "${CAMOUFLAGE_IMAGE}"
+fi
 compose up -d --remove-orphans
 health_check_stack "${IMAGE}" "${VPN_PORT}" 60 || die 'Initial container health check failed.'
 verify_openconnect_data_path "${DOMAIN}" "${VPN_PORT}" "${VPN_USERNAME}" "${GENERATED_VPN_PASSWORD}"

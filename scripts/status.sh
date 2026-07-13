@@ -64,12 +64,12 @@ fi
 ss -ltnup | grep -E ":(${VPN_PORT}|${OCSERV_TCP_PORT}|${OCSERV_CAMOUFLAGE_WEB_PORT}|80)[[:space:]]" || true
 
 printf '\n%s\n' '=== Advanced Camouflage ==='
-if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" && -f "${OCSERV_CAMOUFLAGE_NGINX_SITE}" ]]; then
-  printf '%s\n' 'Mode: TCP-only nginx ALPN routing'
+if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]]; then
+  printf '%s\n' 'Mode: TCP-only nginx ALPN routing in camouflage-site container'
   if [[ -f "${OCSERV_CAMOUFLAGE_SITE_METADATA}" && ! -L "${OCSERV_CAMOUFLAGE_SITE_METADATA}" ]]; then
     CAMOUFLAGE_SITE_SOURCE="$(head -n 1 "${OCSERV_CAMOUFLAGE_SITE_METADATA}")"
     case "${CAMOUFLAGE_SITE_SOURCE}" in
-      template:construction | template:company | template:blog | template:status | custom-download)
+      preset:synology | preset:owncloud | preset:workspace | custom-download)
         printf 'Website source: %s\n' "${CAMOUFLAGE_SITE_SOURCE}"
         ;;
       *) printf '%s\n' 'Website source: unknown' ;;
@@ -77,8 +77,9 @@ if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_STREAM}" && -f "${OCSERV_CAMOUFLAGE_NGINX_SI
   else
     printf '%s\n' 'Website source: metadata missing'
   fi
-  systemctl is-active nginx 2>/dev/null || true
-  nginx -t 2>&1 | sed -n '1,5p' || true
+  docker inspect --format 'container={{.Name}} running={{.State.Running}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} image={{.Config.Image}}' \
+    "${OCSERV_CAMOUFLAGE_CONTAINER}" 2>/dev/null || true
+  docker exec "${OCSERV_CAMOUFLAGE_CONTAINER}" nginx -t 2>&1 | sed -n '1,5p' || true
 else
   printf '%s\n' 'Mode: disabled'
 fi

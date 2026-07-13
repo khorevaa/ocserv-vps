@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import pathlib
 import shutil
@@ -43,7 +44,7 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn('tar -tvzf "${archive}" > "${archive_listing}"', self.installer)
         self.assertNotIn('tar -tvzf "${archive}" |', self.installer)
         self.assertIn('command_path="${OCSERV_VPS_COMMAND_PATH:-/usr/local/bin/ocserv-vps}"', self.installer)
-        self.assertIn('cp -a "${source_root}/assets" "${new_root}/assets"', self.installer)
+        self.assertIn('cp -a "${source_root}/camouflage" "${new_root}/camouflage"', self.installer)
         self.assertIn('"${command_path}" install', self.installer)
         self.assertIn('OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" "${tag}"', self.manager)
         self.assertNotIn('${version:+"${version}"}', self.manager)
@@ -224,7 +225,7 @@ printf 'hidden=%s\n' "$(ocserv_connection_url vpn.example.com 443)"
 validate_camouflage_realm 'Test Environment'
 printf '%s\n' 'realm=Test Environment'
 
-validate_camouflage_site_template company
+validate_camouflage_site_template synology
 validate_camouflage_download_url 'https://downloads.example:8443/site.zip?token=test'
 printf 'download=%s host=%s port=%s\n' \
   "${CAMOUFLAGE_DOWNLOAD_URL}" "${CAMOUFLAGE_DOWNLOAD_HOST}" "${CAMOUFLAGE_DOWNLOAD_PORT}"
@@ -250,6 +251,7 @@ install() {
 chmod() { :; }
 chown() { :; }
 ln() { :; }
+python3() { MSYS2_ARG_CONV_EXCL='/srv/camouflage' "${TEST_PYTHON}" "$@"; }
 
 render_vpn_journal_assets() { :; }
 render_ocserv_config vpn.example.com 10.66.0.0/24 443 1.1.1.1 1.0.0.1 \
@@ -260,33 +262,51 @@ grep -q '^no-udp = true$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
 grep -q '^listen-proxy-proto = true$' "${OCSERV_CONFIG_DIR}/ocserv.conf"
 printf '%s\n' 'advanced-ocserv=tcp-only-proxy-protocol'
 
-nginx_root="${config_root}/nginx"
 OCSERV_CAMOUFLAGE_TEMPLATE_ROOT="${TEST_CAMOUFLAGE_TEMPLATE_ROOT}"
-OCSERV_CAMOUFLAGE_SITE_ROOT="${config_root}/site"
-install_camouflage_site company '' vpn.example.com
-grep -q 'Northstar Systems' "${OCSERV_CAMOUFLAGE_SITE_ROOT}/index.html"
-grep -q '^template:company$' "${OCSERV_CAMOUFLAGE_SITE_ROOT}/.ocserv-vps-source"
-printf '%s\n' 'advanced-site=template:company'
+OCSERV_CAMOUFLAGE_NGINX_RENDERER="${TEST_CAMOUFLAGE_NGINX_RENDERER}"
+OCSERV_STACK_ROOT="${config_root}/stack"
+OCSERV_CAMOUFLAGE_ROOT="${OCSERV_STACK_ROOT}/camouflage"
+OCSERV_CAMOUFLAGE_CONTRACT="${OCSERV_CAMOUFLAGE_ROOT}/camouflage.json"
+OCSERV_CAMOUFLAGE_NGINX_CONFIG="${OCSERV_CAMOUFLAGE_ROOT}/nginx.conf"
+OCSERV_CAMOUFLAGE_SITE_ROOT="${OCSERV_CAMOUFLAGE_ROOT}/site"
+OCSERV_CAMOUFLAGE_SITE_METADATA="${OCSERV_CAMOUFLAGE_SITE_ROOT}/.ocserv-vps-source"
+OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT="/srv/camouflage"
+mkdir -p "${OCSERV_CAMOUFLAGE_ROOT}"
+install_camouflage_site synology '' vpn.example.com
+grep -q 'Synology' "${OCSERV_CAMOUFLAGE_SITE_ROOT}/index.html"
+grep -q '^preset:synology$' "${OCSERV_CAMOUFLAGE_SITE_ROOT}/.ocserv-vps-source"
+test -f "${OCSERV_CAMOUFLAGE_CONTRACT}"
+test ! -e "${OCSERV_CAMOUFLAGE_SITE_ROOT}/camouflage.json"
+printf '%s\n' 'advanced-site=preset:synology'
 
-OCSERV_CAMOUFLAGE_NGINX_SITE="${nginx_root}/sites-available/site.conf"
-OCSERV_CAMOUFLAGE_NGINX_LINK="${nginx_root}/sites-enabled/site.conf"
-OCSERV_CAMOUFLAGE_NGINX_STREAM="${nginx_root}/modules-enabled/90-stream.conf"
-OCSERV_NGINX_STREAM_MODULE_CONFIG="${nginx_root}/modules-enabled/50-stream.conf"
 OCSERV_LETSENCRYPT_LIVE_ROOT="${config_root}/letsencrypt/live"
-mkdir -p "$(dirname "${OCSERV_NGINX_STREAM_MODULE_CONFIG}")" \
-  "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com"
-touch "${OCSERV_NGINX_STREAM_MODULE_CONFIG}" \
-  "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com/fullchain.pem" \
+mkdir -p "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com"
+touch "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com/fullchain.pem" \
   "${OCSERV_LETSENCRYPT_LIVE_ROOT}/vpn.example.com/privkey.pem"
 render_advanced_camouflage_nginx vpn.example.com 443
-grep -q 'ssl_preread on;' "${OCSERV_CAMOUFLAGE_NGINX_STREAM}"
-grep -q 'proxy_protocol on;' "${OCSERV_CAMOUFLAGE_NGINX_STREAM}"
-grep -q 'ssl http2 proxy_protocol;' "${OCSERV_CAMOUFLAGE_NGINX_SITE}"
-grep -q "root ${OCSERV_CAMOUFLAGE_SITE_ROOT};" "${OCSERV_CAMOUFLAGE_NGINX_SITE}"
-if grep -q 'proxy_pass https://' "${OCSERV_CAMOUFLAGE_NGINX_SITE}"; then
+grep -q 'ssl_preread on;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -q 'proxy_protocol on;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -q 'http2 on;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -q "root ${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT};" "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -q 'location = /webman/index.cgi' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -q 'location = /webapi/entry.cgi' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -q 'return 503' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+if grep -q 'proxy_pass https://' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"; then
   printf '%s\n' 'static Camouflage site was configured as a reverse proxy' >&2
   exit 1
 fi
+OCSERV_COMPOSE_FILE="${OCSERV_STACK_ROOT}/compose.yaml"
+OCSERV_ENV_FILE="${OCSERV_STACK_ROOT}/stack.env"
+OCSERV_LOG_DIR="${OCSERV_STACK_ROOT}/logs"
+OCSERV_VPN_JOURNAL_FILE="${OCSERV_LOG_DIR}/vpn-events.jsonl"
+mkdir -p "${OCSERV_LOG_DIR}"
+touch "${OCSERV_VPN_JOURNAL_FILE}"
+write_stack_env 'ghcr.io/khorevaa/ocserv-vps-server:test' \
+  'nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+render_compose_file
+grep -q '^  camouflage-site:$' "${OCSERV_COMPOSE_FILE}"
+grep -q '^    container_name: camouflage-site$' "${OCSERV_COMPOSE_FILE}"
+grep -q './camouflage/site:/srv/camouflage:ro' "${OCSERV_COMPOSE_FILE}"
 printf '%s\n' 'advanced-nginx=alpn-site-or-tls-passthrough'
 
 printf '%s\n' 'camouflage = true' 'camouflage_secret = short' > "${OCSERV_CONFIG_DIR}/ocserv.conf"
@@ -300,8 +320,12 @@ fi
             script.write_text(common + scenario, encoding="utf-8")
             environment = os.environ.copy()
             environment["TEST_CAMOUFLAGE_TEMPLATE_ROOT"] = (
-                self.repository / "assets" / "camouflage-sites"
+                self.repository / "camouflage"
             ).as_posix()
+            environment["TEST_CAMOUFLAGE_NGINX_RENDERER"] = (
+                self.repository / "scripts" / "render-camouflage-nginx.py"
+            ).as_posix()
+            environment["TEST_PYTHON"] = pathlib.Path(sys.executable).as_posix()
             if os.name == "nt":
                 environment["PATH"] = ";".join(
                     (
@@ -334,19 +358,27 @@ fi
             result.stdout,
         )
         self.assertIn("advanced-ocserv=tcp-only-proxy-protocol", result.stdout)
-        self.assertIn("advanced-site=template:company", result.stdout)
+        self.assertIn("advanced-site=preset:synology", result.stdout)
         self.assertIn("advanced-nginx=alpn-site-or-tls-passthrough", result.stdout)
 
     def test_camouflage_site_assets_and_safe_extractor(self) -> None:
-        template_root = self.repository / "assets" / "camouflage-sites"
+        template_root = self.repository / "camouflage"
         self.assertEqual(
-            {path.name for path in template_root.iterdir() if path.is_dir()},
-            {"construction", "company", "blog", "status"},
+            {
+                path.name
+                for path in template_root.iterdir()
+                if path.is_dir() and (path / "camouflage.json").is_file()
+            },
+            {"synology", "owncloud", "workspace"},
         )
-        for template in ("construction", "company", "blog", "status"):
+        for template in ("synology", "owncloud", "workspace"):
             html = (template_root / template / "index.html").read_text(encoding="utf-8")
             self.assertIn("<!doctype html>", html.lower())
             self.assertIn("<title>", html.lower())
+            contract = json.loads(
+                (template_root / template / "camouflage.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(template, contract["id"])
 
         extractor = self.repository / "scripts" / "extract-camouflage-site.py"
         with tempfile.TemporaryDirectory() as directory:
