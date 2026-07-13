@@ -18,6 +18,12 @@ OCSERV_UI_RESTART_TRIGGER="${OCSERV_UI_ACTION_DIR}/restart-ocserv"
 OCSERV_UI_ACTION_TMPFILES_FILE="/etc/tmpfiles.d/ocserv-vps-actions.conf"
 OCSERV_UI_RESTART_PATH_UNIT="/etc/systemd/system/ocserv-vps-restart.path"
 OCSERV_UI_RESTART_SERVICE_UNIT="/etc/systemd/system/ocserv-vps-restart.service"
+OCSERV_UI_CONTAINER_LOG_DIR="/run/ocserv-vps-container-logs"
+OCSERV_UI_CONTAINER_LOG_TRIGGER="${OCSERV_UI_ACTION_DIR}/snapshot-container-logs"
+OCSERV_UI_CONTAINER_LOG_RESPONSE="${OCSERV_UI_ACTION_DIR}/snapshot-container-logs.ready"
+OCSERV_UI_CONTAINER_LOG_PATH_UNIT="/etc/systemd/system/ocserv-vps-container-logs.path"
+OCSERV_UI_CONTAINER_LOG_SERVICE_UNIT="/etc/systemd/system/ocserv-vps-container-logs.service"
+OCSERV_UI_CONTAINER_LOG_SCRIPT="/usr/local/sbin/ocserv-vps-snapshot-container-logs"
 OCSERV_UI_CERT_RENEW_TRIGGER="${OCSERV_UI_ACTION_DIR}/renew-certificate"
 OCSERV_UI_CERT_RENEW_PATH_UNIT="/etc/systemd/system/ocserv-vps-certificate-renew.path"
 OCSERV_UI_CERT_RENEW_SERVICE_UNIT="/etc/systemd/system/ocserv-vps-certificate-renew.service"
@@ -56,7 +62,10 @@ install_ocserv_restart_bridge() {
   [[ "${docker_bin}" == /* && "${docker_bin}" != *[[:space:]]* ]] || die 'Unsafe Docker executable path.'
 
   tmpfiles_temp="$(mktemp /etc/tmpfiles.d/.ocserv-vps-actions.conf.XXXXXX)"
-  printf 'd %s 0770 root %s -\n' "${OCSERV_UI_ACTION_DIR}" "${OCSERV_UI_HOST_GID}" > "${tmpfiles_temp}"
+  {
+    printf 'd %s 0770 root %s -\n' "${OCSERV_UI_ACTION_DIR}" "${OCSERV_UI_HOST_GID}"
+    printf 'd %s 0750 root %s -\n' "${OCSERV_UI_CONTAINER_LOG_DIR}" "${OCSERV_UI_HOST_GID}"
+  } > "${tmpfiles_temp}"
   chmod 0644 "${tmpfiles_temp}"
   mv -T "${tmpfiles_temp}" "${OCSERV_UI_ACTION_TMPFILES_FILE}"
   systemd-tmpfiles --create "${OCSERV_UI_ACTION_TMPFILES_FILE}"
@@ -103,6 +112,141 @@ EOF
   systemctl daemon-reload
   systemctl enable --now ocserv-vps-restart.path >/dev/null
   systemctl is-active --quiet ocserv-vps-restart.path || die 'The ocserv restart path unit is not active.'
+}
+
+install_container_log_snapshot_bridge() {
+  local chmod_bin chown_bin date_bin docker_bin mktemp_bin mv_bin rm_bin sleep_bin stat_bin tail_bin
+  local script_temp service_temp path_temp
+  chmod_bin="$(command -v chmod)"
+  chown_bin="$(command -v chown)"
+  date_bin="$(command -v date)"
+  docker_bin="$(command -v docker)"
+  mktemp_bin="$(command -v mktemp)"
+  mv_bin="$(command -v mv)"
+  rm_bin="$(command -v rm)"
+  sleep_bin="$(command -v sleep)"
+  stat_bin="$(command -v stat)"
+  tail_bin="$(command -v tail)"
+  for executable in "${chmod_bin}" "${chown_bin}" "${date_bin}" "${docker_bin}" "${mktemp_bin}" "${mv_bin}" "${rm_bin}" "${sleep_bin}" "${stat_bin}" "${tail_bin}"; do
+    [[ "${executable}" == /* && "${executable}" != *[[:space:]]* ]] || \
+      die 'Unsafe container-log snapshot executable path.'
+  done
+  [[ -d "${OCSERV_UI_ACTION_DIR}" && ! -L "${OCSERV_UI_ACTION_DIR}" ]] || \
+    die 'Unsafe ocserv action directory.'
+  [[ -d "${OCSERV_UI_CONTAINER_LOG_DIR}" && ! -L "${OCSERV_UI_CONTAINER_LOG_DIR}" && \
+     "$(stat -c '%u:%g %a' "${OCSERV_UI_CONTAINER_LOG_DIR}")" == "0:${OCSERV_UI_HOST_GID} 750" ]] || \
+    die 'Unsafe container-log snapshot directory.'
+  rm -f "${OCSERV_UI_CONTAINER_LOG_TRIGGER}" "${OCSERV_UI_CONTAINER_LOG_RESPONSE}"
+
+  script_temp="$(mktemp /usr/local/sbin/.ocserv-vps-snapshot-container-logs.XXXXXX)"
+  cat > "${script_temp}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=\$'\\n\\t'
+umask 027
+
+trigger='${OCSERV_UI_CONTAINER_LOG_TRIGGER}'
+response='${OCSERV_UI_CONTAINER_LOG_RESPONSE}'
+snapshot_dir='${OCSERV_UI_CONTAINER_LOG_DIR}'
+host_gid='${OCSERV_UI_HOST_GID}'
+raw=''
+bounded=''
+response_temp=''
+
+cleanup() {
+  local status=\$?
+  ${rm_bin} -f -- "\${raw}" "\${bounded}" "\${response_temp}"
+  exit "\${status}"
+}
+trap cleanup EXIT HUP INT TERM
+
+[[ -d "\${snapshot_dir}" && ! -L "\${snapshot_dir}" && \
+   "\$(${stat_bin} -c '%u:%g %a' "\${snapshot_dir}")" == "0:\${host_gid} 750" ]] || exit 1
+[[ -f "\${trigger}" && ! -L "\${trigger}" && \
+   "\$(${stat_bin} -c '%u:%g %a:%h' "\${trigger}")" == "0:\${host_gid} 640:1" ]] || exit 1
+request_id="\$(<"\${trigger}")"
+[[ "\${request_id}" =~ ^[0-9a-f]{32}\$ && "\$(${stat_bin} -c '%s' "\${trigger}")" == 33 ]] || exit 1
+${rm_bin} -f -- "\${trigger}" "\${response}"
+
+for source in server control ui; do
+  case "\${source}" in
+    server) container='ocserv-vps' ;;
+    control) container='ocserv-vps-control' ;;
+    ui) container='ocserv-vps-ui' ;;
+  esac
+  raw="\$(${mktemp_bin} "\${snapshot_dir}/.\${source}.raw.XXXXXX")"
+  bounded="\$(${mktemp_bin} "\${snapshot_dir}/.\${source}.log.XXXXXX")"
+  if ! ${docker_bin} logs --timestamps --tail 2000 "\${container}" > "\${raw}" 2>&1; then
+    printf '%s Container logs are unavailable.\n' "\$(${date_bin} -u +%Y-%m-%dT%H:%M:%S.%NZ)" > "\${raw}"
+  fi
+  if (( \$(${stat_bin} -c '%s' "\${raw}") > 4194304 )); then
+    ${tail_bin} -c 4194304 "\${raw}" > "\${bounded}"
+  else
+    ${mv_bin} -T "\${raw}" "\${bounded}"
+    raw=''
+  fi
+  ${chown_bin} root:"\${host_gid}" "\${bounded}"
+  ${chmod_bin} 0640 "\${bounded}"
+  ${mv_bin} -T "\${bounded}" "\${snapshot_dir}/\${source}.log"
+  bounded=''
+  ${rm_bin} -f -- "\${raw}"
+  raw=''
+done
+
+response_temp="\$(${mktemp_bin} '${OCSERV_UI_ACTION_DIR}/.snapshot-container-logs.ready.XXXXXX')"
+printf '%s\n' "\${request_id}" > "\${response_temp}"
+${chown_bin} root:"\${host_gid}" "\${response_temp}"
+${chmod_bin} 0640 "\${response_temp}"
+${mv_bin} -T "\${response_temp}" "\${response}"
+response_temp=''
+trap - EXIT HUP INT TERM
+EOF
+  chmod 0750 "${script_temp}"
+  chown root:root "${script_temp}"
+  mv -T "${script_temp}" "${OCSERV_UI_CONTAINER_LOG_SCRIPT}"
+
+  service_temp="$(mktemp /etc/systemd/system/.ocserv-vps-container-logs.service.XXXXXX)"
+  cat > "${service_temp}" <<EOF
+[Unit]
+Description=Capture bounded logs for the managed ocserv containers
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStartPre=${sleep_bin} 1
+ExecStart=${OCSERV_UI_CONTAINER_LOG_SCRIPT}
+ExecStopPost=${rm_bin} -f ${OCSERV_UI_CONTAINER_LOG_TRIGGER}
+TimeoutStartSec=20
+TimeoutStopSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=${OCSERV_UI_ACTION_DIR} ${OCSERV_UI_CONTAINER_LOG_DIR}
+EOF
+  chmod 0644 "${service_temp}"
+  mv -T "${service_temp}" "${OCSERV_UI_CONTAINER_LOG_SERVICE_UNIT}"
+
+  path_temp="$(mktemp /etc/systemd/system/.ocserv-vps-container-logs.path.XXXXXX)"
+  cat > "${path_temp}" <<EOF
+[Unit]
+Description=Watch for authenticated container-log snapshot requests
+
+[Path]
+PathExists=${OCSERV_UI_CONTAINER_LOG_TRIGGER}
+Unit=ocserv-vps-container-logs.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 "${path_temp}"
+  mv -T "${path_temp}" "${OCSERV_UI_CONTAINER_LOG_PATH_UNIT}"
+
+  systemctl daemon-reload
+  systemctl enable --now ocserv-vps-container-logs.path >/dev/null
+  systemctl is-active --quiet ocserv-vps-container-logs.path || \
+    die 'The container-log snapshot path unit is not active.'
 }
 
 install_certificate_renewal_bridge() {

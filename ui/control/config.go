@@ -10,40 +10,50 @@ import (
 )
 
 type config struct {
-	SocketPath       string
-	AllowedUID       uint32
-	StatePath        string
-	PasswordPath     string
-	ConfigPath       string
-	CertificatePath  string
-	JournalPath      string
-	OCCTLSocket      string
-	OperationLock    string
-	RestartTrigger   string
-	CertRenewTrigger string
-	OCServBin        string
-	OCPasswordBin    string
-	OCCTLBin         string
-	CommandTimeout   time.Duration
+	SocketPath           string
+	AllowedUID           uint32
+	StatePath            string
+	PasswordPath         string
+	ConfigPath           string
+	CertificatePath      string
+	JournalPath          string
+	OCCTLSocket          string
+	OperationLock        string
+	ContainerLogLock     string
+	ContainerLogDir      string
+	ContainerLogTrigger  string
+	ContainerLogResponse string
+	RestartTrigger       string
+	CertRenewTrigger     string
+	OCServBin            string
+	OCPasswordBin        string
+	OCCTLBin             string
+	CommandTimeout       time.Duration
+	ContainerLogTimeout  time.Duration
 }
 
 func defaultConfig() config {
 	return config{
-		SocketPath:       "/run/ocserv-ui/control.sock",
-		AllowedUID:       10001,
-		StatePath:        "/opt/ocserv-vps/ui-public/state",
-		PasswordPath:     "/opt/ocserv-vps/config/ocpasswd",
-		ConfigPath:       "/opt/ocserv-vps/config/ocserv.conf",
-		CertificatePath:  "/opt/ocserv-vps/ui-public/fullchain.pem",
-		JournalPath:      "/opt/ocserv-vps/logs/vpn-events.jsonl",
-		OCCTLSocket:      "/run/ocserv-control/occtl.sock",
-		OperationLock:    "/opt/ocserv-vps/locks/operation.lock",
-		RestartTrigger:   "/run/ocserv-vps-actions/restart-ocserv",
-		CertRenewTrigger: "/run/ocserv-vps-actions/renew-certificate",
-		OCServBin:        "/usr/local/sbin/ocserv",
-		OCPasswordBin:    "/usr/local/bin/ocpasswd",
-		OCCTLBin:         "/usr/local/bin/occtl",
-		CommandTimeout:   8 * time.Second,
+		SocketPath:           "/run/ocserv-ui/control.sock",
+		AllowedUID:           10001,
+		StatePath:            "/opt/ocserv-vps/ui-public/state",
+		PasswordPath:         "/opt/ocserv-vps/config/ocpasswd",
+		ConfigPath:           "/opt/ocserv-vps/config/ocserv.conf",
+		CertificatePath:      "/opt/ocserv-vps/ui-public/fullchain.pem",
+		JournalPath:          "/opt/ocserv-vps/logs/vpn-events.jsonl",
+		OCCTLSocket:          "/run/ocserv-control/occtl.sock",
+		OperationLock:        "/opt/ocserv-vps/locks/operation.lock",
+		ContainerLogLock:     "/opt/ocserv-vps/locks/container-logs.lock",
+		ContainerLogDir:      "/run/ocserv-vps-container-logs",
+		ContainerLogTrigger:  "/run/ocserv-vps-actions/snapshot-container-logs",
+		ContainerLogResponse: "/run/ocserv-vps-actions/snapshot-container-logs.ready",
+		RestartTrigger:       "/run/ocserv-vps-actions/restart-ocserv",
+		CertRenewTrigger:     "/run/ocserv-vps-actions/renew-certificate",
+		OCServBin:            "/usr/local/sbin/ocserv",
+		OCPasswordBin:        "/usr/local/bin/ocpasswd",
+		OCCTLBin:             "/usr/local/bin/occtl",
+		CommandTimeout:       8 * time.Second,
+		ContainerLogTimeout:  25 * time.Second,
 	}
 }
 
@@ -63,6 +73,10 @@ func configFromEnvironment() (config, error) {
 	cfg.JournalPath = path("OCSERV_UI_JOURNAL_FILE", cfg.JournalPath)
 	cfg.OCCTLSocket = path("OCSERV_UI_OCCTL_SOCKET", cfg.OCCTLSocket)
 	cfg.OperationLock = path("OCSERV_UI_OPERATION_LOCK", cfg.OperationLock)
+	cfg.ContainerLogLock = path("OCSERV_UI_CONTAINER_LOG_LOCK", cfg.ContainerLogLock)
+	cfg.ContainerLogDir = path("OCSERV_UI_CONTAINER_LOG_DIR", cfg.ContainerLogDir)
+	cfg.ContainerLogTrigger = path("OCSERV_UI_CONTAINER_LOG_TRIGGER", cfg.ContainerLogTrigger)
+	cfg.ContainerLogResponse = path("OCSERV_UI_CONTAINER_LOG_RESPONSE", cfg.ContainerLogResponse)
 	cfg.RestartTrigger = path("OCSERV_UI_RESTART_TRIGGER", cfg.RestartTrigger)
 	cfg.CertRenewTrigger = path("OCSERV_UI_CERT_RENEW_TRIGGER", cfg.CertRenewTrigger)
 	cfg.OCServBin = path("OCSERV_UI_OCSERV_BIN", cfg.OCServBin)
@@ -82,6 +96,13 @@ func configFromEnvironment() (config, error) {
 			return config{}, fmt.Errorf("OCSERV_UI_COMMAND_TIMEOUT must be between 0.1 and 60 seconds")
 		}
 		cfg.CommandTimeout = time.Duration(seconds * float64(time.Second))
+	}
+	if value := os.Getenv("OCSERV_UI_CONTAINER_LOG_TIMEOUT"); value != "" {
+		seconds, err := strconv.ParseFloat(value, 64)
+		if err != nil || seconds < 5 || seconds > 30 {
+			return config{}, fmt.Errorf("OCSERV_UI_CONTAINER_LOG_TIMEOUT must be between 5 and 30 seconds")
+		}
+		cfg.ContainerLogTimeout = time.Duration(seconds * float64(time.Second))
 	}
 	return cfg, nil
 }

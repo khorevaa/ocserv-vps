@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"time"
+	"unicode/utf8"
 )
 
 type controlError struct {
@@ -111,4 +114,70 @@ func overviewForWeb(raw json.RawMessage) (map[string]any, error) {
 		"certificate":            map[string]any{"not_after": certificate["expires_at"], "days_remaining": certificate["days_remaining"], "issuer": certificate["issuer"], "valid": certificate["valid"]},
 		"last_openconnect_check": server["openconnect_checked_at"], "updated_at": server["updated_at"],
 	}, nil
+}
+
+type containerLogWebEntry struct {
+	OccurredAt string `json:"occurred_at"`
+	Source     string `json:"source"`
+	Message    string `json:"message"`
+}
+
+type containerLogsWebResponse struct {
+	Entries    []containerLogWebEntry `json:"entries"`
+	Page       int                    `json:"page"`
+	PageSize   int                    `json:"page_size"`
+	Total      int                    `json:"total"`
+	TotalPages int                    `json:"total_pages"`
+	Sort       string                 `json:"sort"`
+	Source     string                 `json:"source"`
+	CapturedAt string                 `json:"captured_at"`
+}
+
+func containerLogsForWeb(raw json.RawMessage) (any, error) {
+	var response containerLogsWebResponse
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&response) != nil {
+		return nil, fmt.Errorf("invalid control response")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("invalid control response")
+	}
+	if !validContainerLogQuery(response.Source, response.Page, response.PageSize, response.Sort) ||
+		response.Total < 0 || response.TotalPages < 1 || response.TotalPages != maxInt(1, (response.Total+response.PageSize-1)/response.PageSize) ||
+		response.Page > response.TotalPages || len(response.Entries) != expectedContainerLogEntries(response) {
+		return nil, fmt.Errorf("invalid control response")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, response.CapturedAt); err != nil {
+		return nil, fmt.Errorf("invalid control response")
+	}
+	for _, entry := range response.Entries {
+		if (entry.Source != "server" && entry.Source != "control" && entry.Source != "ui") ||
+			(response.Source != "all" && entry.Source != response.Source) || len(entry.Message) > 4099 || !utf8.ValidString(entry.Message) {
+			return nil, fmt.Errorf("invalid control response")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, entry.OccurredAt); err != nil {
+			return nil, fmt.Errorf("invalid control response")
+		}
+	}
+	return response, nil
+}
+
+func expectedContainerLogEntries(response containerLogsWebResponse) int {
+	remaining := response.Total - (response.Page-1)*response.PageSize
+	if remaining < 0 {
+		return 0
+	}
+	if remaining > response.PageSize {
+		return response.PageSize
+	}
+	return remaining
+}
+
+func maxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }

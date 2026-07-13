@@ -61,6 +61,12 @@ func startFakeControl(t *testing.T, path string) {
 					result = map[string]any{"connections": []any{map[string]any{"id": 7, "username": "vpn_user", "client_ip": "192.0.2.5", "vpn_ip": "10.66.0.7", "protocol": "OpenConnect", "connected_at": "2026-07-12T10:00:00Z", "duration_seconds": 90}}, "total": 1}
 				case "list_journal":
 					result = map[string]any{"events": []any{map[string]any{"occurred_at": "2026-07-12T10:01:30Z", "event": "disconnected", "username": "vpn_user", "client_ip": "192.0.2.5", "vpn_ip": "10.66.0.7", "protocol": "OpenConnect", "duration_seconds": 90, "bytes_in": 1000, "bytes_out": 2000}}, "total": 1}
+				case "list_container_logs":
+					result = map[string]any{
+						"entries": []any{map[string]any{"occurred_at": "2026-07-13T12:34:56.123456789Z", "source": "control", "message": "control request completed"}},
+						"page":    request["page"], "page_size": request["page_size"], "total": 1, "total_pages": 1,
+						"sort": request["sort"], "source": request["source"], "captured_at": "2026-07-13T12:35:00Z",
+					}
 				case "disconnect_connection":
 					result = map[string]any{"id": request["id"], "disconnected": true}
 				case "restart_service":
@@ -314,6 +320,31 @@ func TestConnectionsJournalAndDisconnect(t *testing.T) {
 	disconnected := perform(app, "DELETE", "/api/v1/connections/7", "", cookie, csrf)
 	if disconnected.Code != 200 || !strings.Contains(disconnected.Body.String(), `"disconnected":true`) {
 		t.Fatalf("disconnect=%d %s", disconnected.Code, disconnected.Body.String())
+	}
+}
+
+func TestContainerLogsUseValidatedServerSidePaginationAndSorting(t *testing.T) {
+	app, _ := testApplication(t, strings.Repeat("A", 64))
+	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+strings.Repeat("A", 64)+`"}`, nil, "")
+	cookie := access.Result().Cookies()[0]
+	response := perform(app, "GET", "/api/v1/container-logs?source=control&page=1&page_size=25&sort=asc&refresh=true", "", cookie, "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"source":"control"`) ||
+		!strings.Contains(response.Body.String(), `"message":"control request completed"`) ||
+		response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("container logs=%d %s", response.Code, response.Body.String())
+	}
+	for _, path := range []string{
+		"/api/v1/container-logs?page=0",
+		"/api/v1/container-logs?page_size=500",
+		"/api/v1/container-logs?sort=name",
+		"/api/v1/container-logs?source=../../docker",
+		"/api/v1/container-logs?refresh=yes",
+		"/api/v1/container-logs?unknown=value",
+	} {
+		invalid := perform(app, "GET", path, "", cookie, "")
+		if invalid.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("invalid container-log query %q=%d %s", path, invalid.Code, invalid.Body.String())
+		}
 	}
 }
 

@@ -7,9 +7,11 @@
     users: [],
     connections: [],
     journal: [],
+    containerLogs: [],
     usersLoaded: false,
     connectionsLoaded: false,
     journalLoaded: false,
+    containerLogsLoaded: false,
     configurationLoaded: false,
     configurationEditing: false,
     configurationContent: "",
@@ -17,6 +19,10 @@
     usersPage: 1,
     connectionsPage: 1,
     journalPage: 1,
+    containerLogsPage: 1,
+    containerLogsTotal: 0,
+    containerLogsTotalPages: 1,
+    containerLogsCapturedAt: "",
     overviewLoaded: false,
     currentView: "overview",
     rotateUsername: "",
@@ -37,6 +43,7 @@
   const userSearch = el("user-search");
   const connectionsTableBody = el("connections-table-body");
   const journalTableBody = el("journal-table-body");
+  const containerLogsTableBody = el("logs-table-body");
   const pageSize = 10;
 
   const themeButton = el("theme-button");
@@ -107,6 +114,9 @@
         backup_too_large: "Файл резервной копии пользователей слишком большой.",
         invalid_import_mode: "Выбран неподдерживаемый режим импорта пользователей.",
         certificate_renewal_unavailable: "Служба перевыпуска сертификата недоступна.",
+        container_logs_pending: "Снимок логов уже обновляется.",
+        container_logs_unavailable: "Не удалось получить логи контейнеров с VPS.",
+        invalid_container_logs_request: "Параметры просмотра логов некорректны.",
         configuration_unavailable: "Управляемая конфигурация ocserv недоступна для чтения.",
         configuration_changed: "Конфигурация была изменена после загрузки. Обновите страницу и повторите правки.",
         invalid_configuration: "ocserv отклонил конфигурацию. Проверьте директивы и указанные пути к файлам.",
@@ -225,9 +235,15 @@
     state.users = [];
     state.connections = [];
     state.journal = [];
+    state.containerLogs = [];
     state.usersLoaded = false;
     state.connectionsLoaded = false;
     state.journalLoaded = false;
+    state.containerLogsLoaded = false;
+    state.containerLogsPage = 1;
+    state.containerLogsTotal = 0;
+    state.containerLogsTotalPages = 1;
+    state.containerLogsCapturedAt = "";
     state.configurationLoaded = false;
     state.configurationEditing = false;
     state.configurationContent = "";
@@ -272,7 +288,7 @@
     setHidden(bootView, true);
     setHidden(appView, false);
     const requestedView = window.location.hash.slice(1);
-    navigateTo(["overview", "connections", "journal", "users", "configuration"].includes(requestedView) ? requestedView : "overview");
+    navigateTo(["overview", "connections", "journal", "logs", "users", "configuration"].includes(requestedView) ? requestedView : "overview");
   }
 
   function handleUnauthorized(error) {
@@ -297,7 +313,7 @@
   }
 
   function navigateTo(view) {
-    const nextView = ["overview", "connections", "journal", "users", "configuration"].includes(view) ? view : "overview";
+    const nextView = ["overview", "connections", "journal", "logs", "users", "configuration"].includes(view) ? view : "overview";
     state.currentView = nextView;
     document.querySelectorAll("[data-panel]").forEach((panel) => {
       setHidden(panel, panel.dataset.panel !== nextView);
@@ -311,13 +327,14 @@
         link.removeAttribute("aria-current");
       }
     });
-    const titles = { overview: "Состояние системы", connections: "Подключения", journal: "Журнал событий", users: "Пользователи", configuration: "Конфигурация ocserv" };
+    const titles = { overview: "Состояние системы", connections: "Подключения", journal: "Журнал событий", logs: "Логи сервера", users: "Пользователи", configuration: "Конфигурация ocserv" };
     document.title = `${titles[nextView]} — ocserv VPN Server`;
     closeSidebar();
 
     if (nextView === "users") loadUsers(true);
     else if (nextView === "connections") loadConnections(true);
     else if (nextView === "journal") loadJournal(true);
+    else if (nextView === "logs") loadContainerLogs(!state.containerLogsLoaded);
     else if (nextView === "configuration") loadConfiguration(true);
     else loadOverview(true);
   }
@@ -1042,6 +1059,122 @@
   el("journal-filter").addEventListener("change", () => { state.journalPage = 1; renderJournal(); });
   el("journal-prev").addEventListener("click", () => { state.journalPage -= 1; renderJournal(); });
   el("journal-next").addEventListener("click", () => { state.journalPage += 1; renderJournal(); });
+
+  function normalizeContainerLogs(payload) {
+    if (!payload || !Array.isArray(payload.entries)
+      || !Number.isInteger(payload.page) || payload.page < 1
+      || !Number.isInteger(payload.page_size) || ![25, 50, 100].includes(payload.page_size)
+      || !Number.isInteger(payload.total) || payload.total < 0
+      || !Number.isInteger(payload.total_pages) || payload.total_pages < 1
+      || typeof payload.captured_at !== "string") {
+      throw new Error("Сервер вернул некорректную страницу логов.");
+    }
+    const entries = payload.entries.map((item) => {
+      if (!item || !["server", "control", "ui"].includes(item.source)
+        || typeof item.occurred_at !== "string" || typeof item.message !== "string") {
+        throw new Error("Сервер вернул некорректную запись лога.");
+      }
+      return {
+        occurredAt: item.occurred_at.replace(/(\.\d{3})\d+Z$/, "$1Z"),
+        source: item.source,
+        message: item.message,
+      };
+    });
+    return {
+      entries,
+      page: payload.page,
+      pageSize: payload.page_size,
+      total: payload.total,
+      totalPages: payload.total_pages,
+      capturedAt: payload.captured_at.replace(/(\.\d{3})\d+Z$/, "$1Z"),
+    };
+  }
+
+  function formatLogDateTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return textOrDash(value);
+    return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "medium" }).format(date);
+  }
+
+  function renderContainerLogs() {
+    containerLogsTableBody.replaceChildren();
+    const labels = { server: "VPN server", control: "Control", ui: "Web UI" };
+    const fragment = document.createDocumentFragment();
+    state.containerLogs.forEach((item) => {
+      const row = document.createElement("tr");
+      const occurred = document.createElement("td");
+      occurred.textContent = formatLogDateTime(item.occurredAt);
+      const sourceCell = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = `log-source-badge log-source-badge--${item.source}`;
+      badge.textContent = labels[item.source];
+      sourceCell.appendChild(badge);
+      const messageCell = document.createElement("td");
+      const message = document.createElement("code");
+      message.className = "container-log-message";
+      message.textContent = item.message || "—";
+      messageCell.appendChild(message);
+      row.append(occurred, sourceCell, messageCell);
+      fragment.appendChild(row);
+    });
+    containerLogsTableBody.appendChild(fragment);
+    const empty = state.containerLogsTotal === 0;
+    containerLogsTableBody.closest(".table-scroll").classList.toggle("is-empty", empty);
+    setHidden(el("logs-loading"), true);
+    setHidden(el("logs-empty"), !empty);
+    const start = empty ? 0 : (state.containerLogsPage - 1) * Number(el("logs-page-size").value) + 1;
+    const end = empty ? 0 : Math.min(state.containerLogsTotal, start + state.containerLogs.length - 1);
+    const range = empty ? "0 записей" : `${start}–${end} из ${state.containerLogsTotal}`;
+    el("logs-count").textContent = `${range} · снимок ${formatLogDateTime(state.containerLogsCapturedAt)}`;
+    el("logs-page").textContent = `${state.containerLogsPage} / ${state.containerLogsTotalPages}`;
+    el("logs-prev").disabled = state.containerLogsPage <= 1;
+    el("logs-next").disabled = state.containerLogsPage >= state.containerLogsTotalPages;
+  }
+
+  async function loadContainerLogs(refresh = false, requestedPage = state.containerLogsPage) {
+    if (state.containerLogsLoaded && !refresh && requestedPage === state.containerLogsPage) return;
+    const refreshButton = el("logs-refresh");
+    clearInlineError(el("logs-error"));
+    setHidden(el("logs-loading"), false);
+    setHidden(el("logs-empty"), true);
+    setBusy(refreshButton, true);
+    const query = new URLSearchParams({
+      source: el("logs-source").value,
+      page: String(requestedPage),
+      page_size: el("logs-page-size").value,
+      sort: el("logs-sort").value,
+      refresh: String(refresh),
+    });
+    try {
+      const normalized = normalizeContainerLogs(await apiRequest(`/api/v1/container-logs?${query.toString()}`));
+      state.containerLogs = normalized.entries;
+      state.containerLogsPage = normalized.page;
+      state.containerLogsTotal = normalized.total;
+      state.containerLogsTotalPages = normalized.totalPages;
+      state.containerLogsCapturedAt = normalized.capturedAt;
+      state.containerLogsLoaded = true;
+      renderContainerLogs();
+    } catch (error) {
+      setHidden(el("logs-loading"), true);
+      if (!handleUnauthorized(error)) showInlineError(el("logs-error"), error.message || "Не удалось загрузить логи сервера.");
+    } finally {
+      setBusy(refreshButton, false);
+    }
+  }
+
+  el("logs-refresh").addEventListener("click", () => {
+    state.containerLogsPage = 1;
+    loadContainerLogs(true, 1);
+  });
+  for (const id of ["logs-source", "logs-sort", "logs-page-size"]) {
+    el(id).addEventListener("change", () => {
+      state.containerLogsLoaded = false;
+      state.containerLogsPage = 1;
+      loadContainerLogs(false, 1);
+    });
+  }
+  el("logs-prev").addEventListener("click", () => loadContainerLogs(false, state.containerLogsPage - 1));
+  el("logs-next").addEventListener("click", () => loadContainerLogs(false, state.containerLogsPage + 1));
 
   function openModal(modalId) {
     if (!state.activeModal) {
