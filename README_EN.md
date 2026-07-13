@@ -57,7 +57,7 @@ sudo ocserv-vps install
 Pass a tag to install a specific manager release:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.7
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.8
 ```
 
 ## Management
