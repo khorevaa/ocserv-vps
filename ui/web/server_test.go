@@ -49,7 +49,7 @@ func startFakeControl(t *testing.T, path string) {
 				var result any
 				switch action {
 				case "overview":
-					result = map[string]any{"service": map[string]any{"status": "running", "active_sessions": 1, "uptime_seconds": 90}, "server": map[string]any{"version": "1.5.0", "image": "ghcr.io/khorevaa/ocserv-vps:1.5.0", "domain": "vpn.test", "vpn_network": "10.66.0.0/24", "vpn_port": 443, "openconnect_checked_at": "2026-07-12T10:00:00Z", "updated_at": "2026-07-12T10:00:00Z"}, "certificate": map[string]any{"expires_at": "2026-10-10T00:00:00Z", "days_remaining": 90, "valid": true}, "users_total": 1}
+					result = map[string]any{"service": map[string]any{"status": "running", "active_sessions": 1, "uptime_seconds": 90}, "server": map[string]any{"version": "1.5.0", "image": "ghcr.io/khorevaa/ocserv-vps-server:1.5.0", "domain": "vpn.test", "vpn_network": "10.66.0.0/24", "vpn_port": 443, "openconnect_checked_at": "2026-07-12T10:00:00Z", "updated_at": "2026-07-12T10:00:00Z"}, "certificate": map[string]any{"expires_at": "2026-10-10T00:00:00Z", "days_remaining": 90, "valid": true}, "users_total": 1}
 				case "list_users":
 					result = map[string]any{"users": []any{map[string]any{"username": "vpn_user", "active_sessions": 1}}, "total": 1}
 				case "list_connections":
@@ -82,7 +82,7 @@ func testApplication(t *testing.T, accessSecret string) (*application, config) {
 	writeTestSecret(t, sessionKey, "test-session-key-with-at-least-32-bytes!")
 	writeTestSecret(t, access, accessSecret)
 	startFakeControl(t, control)
-	cfg := config{DataFile: filepath.Join(root, "state.json"), ControlSocket: control, WebSocket: filepath.Join(root, "web.sock"), SessionKeyFile: sessionKey, AccessSecretFile: access, UIImage: "ghcr.io/khorevaa/ocserv-vps-ui:0.4.5", VPNDomain: "vpn.test", AllowedOrigin: testOrigin, AllowedHost: strings.TrimPrefix(testOrigin, "http://"), SessionTTLSeconds: 3600, AuditRetentionSeconds: 3600, AuditMaxRows: 20, ControlTimeoutSeconds: 1, MaxRequestBytes: 16384, RequireRootSecrets: false}
+	cfg := config{DataFile: filepath.Join(root, "state.json"), ControlSocket: control, WebSocket: filepath.Join(root, "web.sock"), SessionKeyFile: sessionKey, AccessSecretFile: access, UIImage: "ghcr.io/khorevaa/ocserv-vps-ui-web:0.4.5", VPNDomain: "vpn.test", AllowedOrigin: testOrigin, AllowedHost: strings.TrimPrefix(testOrigin, "http://"), SessionTTLSeconds: 3600, AuditRetentionSeconds: 3600, AuditMaxRows: 20, ControlTimeoutSeconds: 1, MaxRequestBytes: 16384, RequireRootSecrets: false}
 	app, err := newApplication(cfg)
 	if err != nil {
 		t.Fatal(err)

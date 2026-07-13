@@ -91,7 +91,7 @@ func testService(t *testing.T) (*controlService, *fakeRunner, config) {
 	state := filepath.Join(root, "state")
 	stateBody := strings.Join([]string{
 		"current_version=1.5.0",
-		"current_image=ghcr.io/khorevaa/ocserv-vps:1.5.0",
+		"current_image=ghcr.io/khorevaa/ocserv-vps-server:1.5.0",
 		"domain=vpn.example.com",
 		"vpn_network=10.66.0.0/24",
 		"vpn_port=443",

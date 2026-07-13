@@ -120,7 +120,7 @@ install_stack() {
   require_approval 'firewall replacement' OCSERV_APPROVE_FIREWALL
   require_approval 'VPN restart and active-session interruption' OCSERV_APPROVE_RESTART
 
-  image="ghcr.io/khorevaa/ocserv-vps:${version}"
+  image="ghcr.io/khorevaa/ocserv-vps-server:${version}"
   local -a args=(
     --domain "${domain}" --acme-email "${email}" --vpn-username "${username}"
     --version "${version}" --image "${image}" --vpn-network "${vpn_network}"
@@ -135,8 +135,8 @@ install_stack() {
     prompt_value ui_version 'UI version' '0.4.11' OCSERV_UI_VERSION
     runtime_task install-ui.sh \
       --ui-version "${ui_version}" \
-      --ui-image "ghcr.io/khorevaa/ocserv-vps-ui:${ui_version}" \
-      --control-image "ghcr.io/khorevaa/ocserv-vps-control:${ui_version}" \
+      --ui-image "ghcr.io/khorevaa/ocserv-vps-ui-web:${ui_version}" \
+      --control-image "ghcr.io/khorevaa/ocserv-vps-ui-control:${ui_version}" \
       --ui-port "${OCSERV_UI_PORT:-8765}" --ssh-port "${ssh_port}" --approve-restart
   fi
   echo -e "${green}ocserv-vps installation finished.${plain}"
@@ -157,7 +157,7 @@ update_vpn() {
   local version image
   prompt_value version 'New ocserv image version' '' OCSERV_VERSION
   require_approval 'VPN restart and active-session interruption' OCSERV_APPROVE_RESTART
-  image="ghcr.io/khorevaa/ocserv-vps:${version}"
+  image="ghcr.io/khorevaa/ocserv-vps-server:${version}"
   runtime_task deploy-release.sh --version "${version}" --image "${image}" --approve-restart
 }
 
@@ -177,8 +177,8 @@ install_ui() {
   require_approval 'VPN/UI restart during UI installation' OCSERV_APPROVE_RESTART
   runtime_task install-ui.sh \
     --ui-version "${version}" \
-    --ui-image "ghcr.io/khorevaa/ocserv-vps-ui:${version}" \
-    --control-image "ghcr.io/khorevaa/ocserv-vps-control:${version}" \
+    --ui-image "ghcr.io/khorevaa/ocserv-vps-ui-web:${version}" \
+    --control-image "ghcr.io/khorevaa/ocserv-vps-ui-control:${version}" \
     --ui-port "${OCSERV_UI_PORT:-8765}" --ssh-port "${ssh_port}" --approve-restart
 }
 
@@ -189,8 +189,8 @@ update_ui() {
   require_approval 'UI restart' OCSERV_APPROVE_RESTART
   runtime_task upgrade-ui.sh \
     --ui-version "${version}" \
-    --ui-image "ghcr.io/khorevaa/ocserv-vps-ui:${version}" \
-    --control-image "ghcr.io/khorevaa/ocserv-vps-control:${version}" \
+    --ui-image "ghcr.io/khorevaa/ocserv-vps-ui-web:${version}" \
+    --control-image "ghcr.io/khorevaa/ocserv-vps-ui-control:${version}" \
     --approve-restart
 }
 

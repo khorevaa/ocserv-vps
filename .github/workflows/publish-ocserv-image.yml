@@ -97,7 +97,7 @@ jobs:
           cp docker/entrypoint.sh docker/context/entrypoint.sh
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           source_sha="${SOURCE_SHA256,,}"
-          tag="ghcr.io/${owner}/ocserv-vps:${VERSION}"
+          tag="ghcr.io/${owner}/ocserv-vps-server:${VERSION}"
           docker buildx build \
             --file docker/Dockerfile \
             --build-arg "BASE_IMAGE=${BASE_IMAGE}" \

@@ -15,7 +15,7 @@ on:
       ocserv_image:
         description: Exact ghcr.io ocserv image version tag used by the control image
         required: true
-        default: ghcr.io/khorevaa/ocserv-vps:1.5.0
+        default: ghcr.io/khorevaa/ocserv-vps-server:1.5.0
         type: string
 
 permissions:
@@ -43,7 +43,7 @@ jobs:
           [[ "${GITHUB_REPOSITORY_OWNER,,}" == 'khorevaa' ]]
           [[ "${VERSION}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
           [[ "${GO_BUILD_IMAGE}" == 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' ]]
-          [[ "${OCSERV_IMAGE}" == 'ghcr.io/khorevaa/ocserv-vps:1.5.0' ]]
+          [[ "${OCSERV_IMAGE}" == 'ghcr.io/khorevaa/ocserv-vps-server:1.5.0' ]]
 
       - name: Check shell syntax
         run: |
@@ -105,7 +105,7 @@ jobs:
           [[ "${GITHUB_REF}" == 'refs/heads/develop' ]]
           [[ "${VERSION}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
           [[ "${GO_BUILD_IMAGE}" == 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' ]]
-          [[ "${OCSERV_IMAGE}" == 'ghcr.io/khorevaa/ocserv-vps:1.5.0' ]]
+          [[ "${OCSERV_IMAGE}" == 'ghcr.io/khorevaa/ocserv-vps-server:1.5.0' ]]
 
       - name: Authenticate to GHCR
         env:
@@ -133,8 +133,8 @@ jobs:
             return 2
           }
           for image in \
-            "ghcr.io/${owner}/ocserv-vps-ui:${VERSION}" \
-            "ghcr.io/${owner}/ocserv-vps-control:${VERSION}"; do
+            "ghcr.io/${owner}/ocserv-vps-ui-web:${VERSION}" \
+            "ghcr.io/${owner}/ocserv-vps-ui-control:${VERSION}"; do
             if image_exists "${image}"; then
               docker pull "${image}"
               revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}")"
@@ -157,10 +157,10 @@ jobs:
         run: |
           set -euo pipefail
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          ui_image="ghcr.io/${owner}/ocserv-vps-ui:${VERSION}"
-          control_image="ghcr.io/${owner}/ocserv-vps-control:${VERSION}"
-          ui_staging="ghcr.io/${owner}/ocserv-vps-ui:revision-${VERSION}-${GITHUB_SHA}"
-          control_staging="ghcr.io/${owner}/ocserv-vps-control:revision-${VERSION}-${GITHUB_SHA}"
+          ui_image="ghcr.io/${owner}/ocserv-vps-ui-web:${VERSION}"
+          control_image="ghcr.io/${owner}/ocserv-vps-ui-control:${VERSION}"
+          ui_staging="ghcr.io/${owner}/ocserv-vps-ui-web:revision-${VERSION}-${GITHUB_SHA}"
+          control_staging="ghcr.io/${owner}/ocserv-vps-ui-control:revision-${VERSION}-${GITHUB_SHA}"
           image_exists() {
             local output
             if output="$(docker buildx imagetools inspect "$1" 2>&1)"; then

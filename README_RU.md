@@ -60,9 +60,9 @@ ocserv-vps uninstall [--purge-data]
 
 ## Образы
 
-- `ghcr.io/khorevaa/ocserv-vps:<версия-ocserv>`
-- `ghcr.io/khorevaa/ocserv-vps-ui:<версия-ui>`
-- `ghcr.io/khorevaa/ocserv-vps-control:<версия-ui>`
+- `ghcr.io/khorevaa/ocserv-vps-server:<версия-ocserv>`
+- `ghcr.io/khorevaa/ocserv-vps-ui-web:<версия-ui>`
+- `ghcr.io/khorevaa/ocserv-vps-ui-control:<версия-ui>`
 
 Разворачиваются только явные version-теги. Перед активацией проверяются labels версии, исходного репозитория, компонента, ревизии и совместимости control-образа с ocserv.
 

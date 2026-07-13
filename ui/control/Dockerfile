@@ -1,5 +1,5 @@
 ARG BUILD_IMAGE=golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
-ARG OCSERV_IMAGE=ghcr.io/khorevaa/ocserv-vps:1.5.0
+ARG OCSERV_IMAGE=ghcr.io/khorevaa/ocserv-vps-server:1.5.0
 FROM ${BUILD_IMAGE} AS build
 
 WORKDIR /src

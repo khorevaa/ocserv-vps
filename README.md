@@ -60,9 +60,9 @@ The installer preserves an existing Docker Engine and adds Docker/Compose only w
 
 ## Published images
 
-- `ghcr.io/khorevaa/ocserv-vps:<ocserv-version>`
-- `ghcr.io/khorevaa/ocserv-vps-ui:<ui-version>`
-- `ghcr.io/khorevaa/ocserv-vps-control:<ui-version>`
+- `ghcr.io/khorevaa/ocserv-vps-server:<ocserv-version>`
+- `ghcr.io/khorevaa/ocserv-vps-ui-web:<ui-version>`
+- `ghcr.io/khorevaa/ocserv-vps-ui-control:<ui-version>`
 
 Only explicit version tags are deployed. The runtime validates image version, source, component, revision, and ocserv compatibility labels before activation.
 

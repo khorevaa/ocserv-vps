@@ -1,0 +1,88 @@
+name: Migrate legacy ocserv image
+
+on:
+  workflow_dispatch:
+    inputs:
+      ocserv_version:
+        description: Existing verified ocserv version to migrate
+        required: true
+        default: '1.5.0'
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: migrate-legacy-ocserv-${{ inputs.ocserv_version }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate migration input
+        env:
+          VERSION: ${{ inputs.ocserv_version }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == 'khorevaa/ocserv-vps' ]]
+          [[ "${VERSION}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]]
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Migrate verified image into repository-owned package
+        id: migrate
+        env:
+          VERSION: ${{ inputs.ocserv_version }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          source="ghcr.io/${owner}/ocserv-vps:${VERSION}"
+          target="ghcr.io/${owner}/ocserv-vps-server:${VERSION}"
+
+          if docker buildx imagetools inspect "${target}" >/dev/null 2>&1; then
+            docker pull "${target}"
+            [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${target}")" == "${VERSION}" ]]
+            [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.source" }}' "${target}")" == 'https://github.com/khorevaa/ocserv-vps' ]]
+          else
+            docker buildx build \
+              --file docker/Migration.Dockerfile \
+              --build-arg "SOURCE_IMAGE=${source}" \
+              --tag "${target}" \
+              --provenance=mode=max \
+              --sbom=true \
+              --push \
+              docker
+          fi
+
+          docker pull "${target}"
+          [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${target}")" == "${VERSION}" ]]
+          [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.source" }}' "${target}")" == 'https://github.com/khorevaa/ocserv-vps' ]]
+          [[ "$(docker image inspect --format '{{ index .Config.Labels "org.ocserv-vps.source-sha256" }}' "${target}")" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.base.name" }}' "${target}")" =~ @sha256:[0-9A-Fa-f]{64}$ ]]
+          docker run --rm --entrypoint /usr/local/sbin/ocserv "${target}" --version
+          printf 'image=%s\n' "${target}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish result summary
+        env:
+          IMAGE: ${{ steps.migrate.outputs.image }}
+        run: |
+          {
+            echo '## Migrated ocserv image'
+            echo
+            echo '```text'
+            echo "${IMAGE}"
+            echo '```'
+            echo
+            echo '> Make the newly created GHCR package public before anonymous VPS installation.'
+          } >> "${GITHUB_STEP_SUMMARY}"
