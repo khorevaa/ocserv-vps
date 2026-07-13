@@ -4,7 +4,7 @@
 
 A ready-to-run [ocserv](https://www.infradead.org/ocserv/) VPN server for your own VPS, with one-command installation, user management, and a private web panel.
 
-![ocserv-vps management panel](docs/images/ui-overview.png)
+![System status in the ocserv-vps management panel](docs/images/ui-overview.png)
 
 ## Features
 
@@ -89,6 +89,18 @@ The status page can copy the VPN domain, the ready-to-use SSH command for the pr
 ### Protected access
 
 ![Accessing the panel with an access secret](docs/images/ui-access.png)
+
+### System status
+
+![VPN server, certificate, and management panel status](docs/images/ui-overview.png)
+
+### Active connections
+
+![Active VPN connections](docs/images/ui-connections.png)
+
+### Event journal
+
+![VPN connection and disconnection journal](docs/images/ui-journal.png)
 
 ### User management
 
