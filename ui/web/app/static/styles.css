@@ -15,6 +15,7 @@
   --green-soft: #e4f6ec;
   --red: #d83b47;
   --red-soft: #fff0f1;
+  --danger-text: #a62832;
   --amber: #b76a00;
   --amber-soft: #fff5dd;
   --shadow: 0 18px 50px rgb(30 52 74 / 14%);
@@ -43,6 +44,7 @@
   --green-soft: #153b2b;
   --red: #ff6b75;
   --red-soft: #47242a;
+  --danger-text: #ff9ca3;
   --amber: #f2b557;
   --amber-soft: #49371d;
   --shadow: 0 18px 50px rgb(0 0 0 / 35%);
@@ -68,6 +70,7 @@
     --green-soft: #153b2b;
     --red: #ff6b75;
     --red-soft: #47242a;
+    --danger-text: #ff9ca3;
     --amber: #f2b557;
     --amber-soft: #49371d;
     --shadow: 0 18px 50px rgb(0 0 0 / 35%);
@@ -445,7 +448,7 @@ svg {
 
 .alert--danger {
   margin-bottom: 18px;
-  color: #a62832;
+  color: var(--danger-text);
   background: var(--red-soft);
   border-color: #f3c7ca;
 }
