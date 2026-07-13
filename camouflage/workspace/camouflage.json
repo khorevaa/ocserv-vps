@@ -2,6 +2,7 @@
   "schema_version": 1,
   "id": "workspace",
   "name": "Orbit Workspace",
+  "realm": "Orbit Workspace",
   "document": "index.html",
   "entry_paths": ["/", "/login"],
   "requests_on_open": [

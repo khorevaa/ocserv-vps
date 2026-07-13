@@ -2,6 +2,7 @@
   "schema_version": 1,
   "id": "owncloud",
   "name": "ownCloud",
+  "realm": "ownCloud",
   "document": "index.html",
   "entry_paths": ["/", "/index.php/login"],
   "requests_on_open": [

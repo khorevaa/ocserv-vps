@@ -16,6 +16,7 @@ CONTENT_TYPE = re.compile(
     r"^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+(?:;\s*charset=[A-Za-z0-9._-]+)?$",
     re.IGNORECASE,
 )
+SAFE_REALM = re.compile(r"^[A-Za-z0-9][-A-Za-z0-9._ ]{0,63}$")
 MAX_BODY_BYTES = 16 * 1024
 INTERNAL_DOCUMENT_URI = "/.ocserv-vps-camouflage-document"
 
@@ -78,7 +79,9 @@ def response_contract(value: object, label: str) -> dict[str, object]:
     return {"status": status, "content_type": content_type, "body": body}
 
 
-def load_contract(manifest: pathlib.Path) -> tuple[dict[str, dict[str, object]], str]:
+def load_contract(
+    manifest: pathlib.Path,
+) -> tuple[dict[str, dict[str, object]], str, str]:
     try:
         contract = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -88,6 +91,7 @@ def load_contract(manifest: pathlib.Path) -> tuple[dict[str, dict[str, object]],
         "schema_version",
         "id",
         "name",
+        "realm",
         "document",
         "entry_paths",
         "requests_on_open",
@@ -102,6 +106,9 @@ def load_contract(manifest: pathlib.Path) -> tuple[dict[str, dict[str, object]],
         raise ContractError("preset id is unsafe")
     if not isinstance(contract["name"], str) or not contract["name"].strip():
         raise ContractError("preset name is missing")
+    realm = contract["realm"]
+    if not isinstance(realm, str) or not SAFE_REALM.fullmatch(realm):
+        raise ContractError("preset realm is unsafe")
     if contract["document"] != "index.html":
         raise ContractError("preset document must be index.html")
 
@@ -162,7 +169,7 @@ def load_contract(manifest: pathlib.Path) -> tuple[dict[str, dict[str, object]],
         if len(response_types) > 1:
             raise ContractError(f"responses for {path} require incompatible content types")
 
-    return routes, preset_id
+    return routes, preset_id, realm
 
 
 def render_response(response: dict[str, object]) -> str:
@@ -176,7 +183,7 @@ def render_response(response: dict[str, object]) -> str:
 def render(manifest: pathlib.Path, site_root: str) -> str:
     if not SAFE_ROOT.fullmatch(site_root) or "//" in site_root or "/../" in f"{site_root}/":
         raise ContractError("site root is unsafe")
-    routes, preset_id = load_contract(manifest)
+    routes, preset_id, _ = load_contract(manifest)
     lines = [
         f"    # Generated from the validated {preset_id} Camouflage preset contract.",
         f"    error_page 418 =200 {INTERNAL_DOCUMENT_URI};",
@@ -217,15 +224,24 @@ def render(manifest: pathlib.Path, site_root: str) -> str:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print("usage: render-camouflage-nginx.py <camouflage.json> <site-root>", file=sys.stderr)
+    print_realm = len(argv) == 3 and argv[1] == "--print-realm"
+    render_config = len(argv) == 3 and argv[1] != "--print-realm"
+    if not print_realm and not render_config:
+        print(
+            "usage: render-camouflage-nginx.py [--print-realm] <camouflage.json> [site-root]",
+            file=sys.stderr,
+        )
         return 2
-    manifest = pathlib.Path(argv[1])
+    manifest = pathlib.Path(argv[2] if print_realm else argv[1])
     if not manifest.is_file() or manifest.is_symlink():
         print("preset contract is missing or unsafe", file=sys.stderr)
         return 1
     try:
-        print(render(manifest, argv[2]))
+        if print_realm:
+            _, _, realm = load_contract(manifest)
+            print(realm)
+        else:
+            print(render(manifest, argv[2]))
     except ContractError as error:
         print(f"invalid Camouflage preset contract: {error}", file=sys.stderr)
         return 1

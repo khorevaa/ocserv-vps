@@ -237,15 +237,17 @@ install_stack() {
   if prompt_yes_no 'Enable ocserv Camouflage?' 0 OCSERV_CAMOUFLAGE; then
     camouflage=1
     prompt_optional camouflage_secret 'Camouflage secret (empty to generate securely)' '' OCSERV_CAMOUFLAGE_SECRET
-    prompt_value camouflage_realm 'Camouflage realm' 'Test Environment' OCSERV_CAMOUFLAGE_REALM
     if prompt_yes_no 'Enable advanced TCP-only website Camouflage?' 0 OCSERV_ADVANCED_CAMOUFLAGE; then
       advanced_camouflage=1
       prompt_camouflage_site_template camouflage_site_template
       if [[ "${camouflage_site_template}" == custom ]]; then
+        prompt_value camouflage_realm 'Camouflage realm' 'Test Environment' OCSERV_CAMOUFLAGE_REALM
         prompt_value camouflage_site_url 'Direct HTTPS URL of the static-site archive or HTML file' '' OCSERV_CAMOUFLAGE_SITE_URL
       elif [[ ${noninteractive} -eq 1 && -n "${OCSERV_CAMOUFLAGE_SITE_URL:-}" ]]; then
         die 'OCSERV_CAMOUFLAGE_SITE_URL requires OCSERV_CAMOUFLAGE_SITE_TEMPLATE=custom'
       fi
+    else
+      prompt_value camouflage_realm 'Camouflage realm' 'Test Environment' OCSERV_CAMOUFLAGE_REALM
     fi
   elif [[ ${noninteractive} -eq 1 ]]; then
     advanced_answer="${OCSERV_ADVANCED_CAMOUFLAGE:-0}"
@@ -499,7 +501,9 @@ set OCSERV_VPS_NONINTERACTIVE=1 plus OCSERV_DOMAIN, OCSERV_ACME_EMAIL,
 OCSERV_APPROVE_FIREWALL=1, and OCSERV_APPROVE_RESTART=1.
 Set OCSERV_CAMOUFLAGE=1 to enable Camouflage; OCSERV_CAMOUFLAGE_SECRET is
 optional and defaults to a securely generated secret.
-OCSERV_CAMOUFLAGE_REALM defaults to "Test Environment".
+OCSERV_CAMOUFLAGE_REALM defaults to "Test Environment" for native Camouflage
+and custom advanced sites. Built-in advanced presets define their realm in
+camouflage.json.
 Set OCSERV_ADVANCED_CAMOUFLAGE=1 together with OCSERV_CAMOUFLAGE=1 and
 choose OCSERV_CAMOUFLAGE_SITE_TEMPLATE=synology|owncloud|workspace|custom
 to install TCP-only nginx Camouflage. For custom, set OCSERV_CAMOUFLAGE_SITE_URL

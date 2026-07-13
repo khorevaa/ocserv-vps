@@ -15,7 +15,7 @@ Each preset directory is a complete package with exactly two files:
 ```
 
 - `index.html` contains all HTML, CSS, and JavaScript needed to render the page;
-- `camouflage.json` describes entry paths, read-only requests made on page load, stub responses, and the form request contract.
+- `camouflage.json` describes the ocserv realm, entry paths, read-only requests made on page load, stub responses, and the form request contract. Built-in advanced presets supply `camouflage_realm` from this validated contract during installation.
 
 Characteristic asset and API paths are requested when the page opens, but they are response contracts rather than physical files. During VPS installation, `scripts/render-camouflage-nginx.py` validates the selected `camouflage.json` and translates it into exact local Nginx locations. Only `index.html` is mounted as website content; the contract remains outside the web root.
 

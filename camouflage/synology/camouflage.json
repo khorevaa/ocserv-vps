@@ -2,6 +2,7 @@
   "schema_version": 1,
   "id": "synology",
   "name": "Synology DSM",
+  "realm": "Synology DSM",
   "document": "index.html",
   "entry_paths": ["/", "/webman/", "/webman/index.cgi"],
   "requests_on_open": [

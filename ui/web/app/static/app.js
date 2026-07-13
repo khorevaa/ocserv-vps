@@ -711,9 +711,14 @@
     clearInlineError(el("overview-error"));
     setBusy(refreshButton, true);
     try {
-      const [data, ui] = await Promise.all([apiRequest("/api/v1/overview"), apiRequest("/api/v1/ui")]);
+      const [data, ui, camouflage] = await Promise.all([
+        apiRequest("/api/v1/overview"),
+        apiRequest("/api/v1/ui"),
+        apiRequest("/api/v1/camouflage"),
+      ]);
       renderOverview(data || {});
       renderUIInfo(ui || {});
+      renderOverviewCamouflage(normalizeCamouflage(camouflage));
       state.overviewLoaded = true;
     } catch (error) {
       if (!handleUnauthorized(error)) {
@@ -840,8 +845,20 @@
     return `${site.name} · пресет ${site.preset}`;
   }
 
+  function renderOverviewCamouflage(data) {
+    const labels = {
+      disabled: "Без маскировки",
+      native: "Скрытый режим ocserv",
+      advanced: "Продвинутая маскировка",
+    };
+    const link = el("overview-camouflage-mode");
+    link.textContent = labels[data.mode];
+    link.dataset.mode = data.mode;
+  }
+
   function renderCamouflage(data) {
     state.camouflage = data;
+    renderOverviewCamouflage(data);
     const labels = {
       disabled: {
         name: "Без маскировки",
@@ -1505,10 +1522,15 @@
       for (let attempt = 0; attempt < 20; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
         try {
-          const [overview, ui] = await Promise.all([apiRequest("/api/v1/overview"), apiRequest("/api/v1/ui")]);
+          const [overview, ui, camouflage] = await Promise.all([
+            apiRequest("/api/v1/overview"),
+            apiRequest("/api/v1/ui"),
+            apiRequest("/api/v1/camouflage"),
+          ]);
           if (isServiceOnline(overview && overview.service && overview.service.status)) {
             renderOverview(overview);
             renderUIInfo(ui || {});
+            renderOverviewCamouflage(normalizeCamouflage(camouflage));
             state.overviewLoaded = true;
             showToast("ocserv снова работает", "success");
             return;

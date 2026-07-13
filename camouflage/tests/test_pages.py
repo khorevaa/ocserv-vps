@@ -11,6 +11,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class CamouflagePagesTest(unittest.TestCase):
+    REALMS = {
+        "owncloud": "ownCloud",
+        "synology": "Synology DSM",
+        "workspace": "Orbit Workspace",
+    }
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.presets = sorted(
@@ -44,6 +50,7 @@ class CamouflagePagesTest(unittest.TestCase):
                 self.assertEqual(preset.name, contract["id"])
                 self.assertEqual("index.html", contract["document"])
                 self.assertTrue(contract["name"])
+                self.assertEqual(self.REALMS[preset.name], contract["realm"])
                 self.assertIn("/", contract["entry_paths"])
                 self.assertTrue(
                     all(path.startswith("/") for path in contract["entry_paths"])

@@ -81,8 +81,6 @@ validate_port 'VPN port' "${VPN_PORT}"
 validate_port 'SSH port' "${SSH_PORT}"
 if [[ "${CAMOUFLAGE}" == "1" ]]; then
   [[ -z "${CAMOUFLAGE_SECRET}" ]] || validate_camouflage_secret "${CAMOUFLAGE_SECRET}"
-  CAMOUFLAGE_REALM="${CAMOUFLAGE_REALM:-Test Environment}"
-  validate_camouflage_realm "${CAMOUFLAGE_REALM}"
 else
   [[ -z "${CAMOUFLAGE_SECRET}" && -z "${CAMOUFLAGE_REALM}" ]] || \
     die 'Camouflage settings require --camouflage.'
@@ -103,6 +101,11 @@ else
   [[ -z "${CAMOUFLAGE_SITE_URL}" ]] || die '--camouflage-site-url requires --advanced-camouflage.'
   [[ "${CAMOUFLAGE_SITE_TEMPLATE}" == synology ]] || \
     die '--camouflage-site-template requires --advanced-camouflage.'
+fi
+if [[ "${CAMOUFLAGE}" == "1" && \
+      ( "${ADVANCED_CAMOUFLAGE}" != "1" || "${CAMOUFLAGE_SITE_TEMPLATE}" == custom ) ]]; then
+  CAMOUFLAGE_REALM="${CAMOUFLAGE_REALM:-Test Environment}"
+  validate_camouflage_realm "${CAMOUFLAGE_REALM}"
 fi
 unset OCSERV_BOOTSTRAP_CAMOUFLAGE_SECRET OCSERV_BOOTSTRAP_CAMOUFLAGE_REALM \
   OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL
@@ -234,6 +237,18 @@ if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
   CAMOUFLAGE_IMAGE="${RESOLVED_CAMOUFLAGE_IMAGE}"
 fi
 
+if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
+  install_camouflage_site "${CAMOUFLAGE_SITE_TEMPLATE}" "${CAMOUFLAGE_SITE_URL}" "${DOMAIN}"
+  CAMOUFLAGE_SITE_URL=''
+  unset CAMOUFLAGE_DOWNLOAD_URL CAMOUFLAGE_DOWNLOAD_AUTHORITY \
+    CAMOUFLAGE_DOWNLOAD_HOST CAMOUFLAGE_DOWNLOAD_PORT
+  if [[ "${CAMOUFLAGE_SITE_TEMPLATE}" != custom ]]; then
+    CAMOUFLAGE_REALM="$(python3 "${OCSERV_CAMOUFLAGE_NGINX_RENDERER}" \
+      --print-realm "${OCSERV_CAMOUFLAGE_CONTRACT}")"
+    validate_camouflage_realm "${CAMOUFLAGE_REALM}"
+  fi
+fi
+
 render_ocserv_config "${DOMAIN}" "${VPN_NETWORK}" "${VPN_PORT}" "${DNS_PRIMARY}" "${DNS_SECONDARY}" \
   "${CAMOUFLAGE}" "${CAMOUFLAGE_SECRET}" "${CAMOUFLAGE_REALM}" "${ADVANCED_CAMOUFLAGE}"
 VPN_SERVER_URL="$(ocserv_connection_url "${DOMAIN}" "${VPN_PORT}")"
@@ -252,13 +267,6 @@ if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
   render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 0
 else
   render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 1
-fi
-
-if [[ "${ADVANCED_CAMOUFLAGE}" == "1" ]]; then
-  install_camouflage_site "${CAMOUFLAGE_SITE_TEMPLATE}" "${CAMOUFLAGE_SITE_URL}" "${DOMAIN}"
-  CAMOUFLAGE_SITE_URL=''
-  unset CAMOUFLAGE_DOWNLOAD_URL CAMOUFLAGE_DOWNLOAD_AUTHORITY \
-    CAMOUFLAGE_DOWNLOAD_HOST CAMOUFLAGE_DOWNLOAD_PORT
 fi
 
 if [[ "${PREPARE_NGINX}" == "1" ]]; then

@@ -26,6 +26,19 @@ class CamouflageNginxRendererTest(unittest.TestCase):
             check=False,
         )
 
+    def realm(self, preset: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(RENDERER),
+                "--print-realm",
+                str(ROOT / preset / "camouflage.json"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
     def test_every_preset_renders_exact_local_routes(self) -> None:
         for preset in ("synology", "owncloud", "workspace"):
             with self.subTest(preset=preset):
@@ -45,6 +58,35 @@ class CamouflageNginxRendererTest(unittest.TestCase):
                 form_path = contract["form_request"]["target"].split("?", 1)[0]
                 self.assertIn(f"location = {form_path} {{", result.stdout)
                 self.assertIn("if ($request_method = POST)", result.stdout)
+
+    def test_every_preset_exposes_its_validated_realm(self) -> None:
+        expected = {
+            "synology": "Synology DSM",
+            "owncloud": "ownCloud",
+            "workspace": "Orbit Workspace",
+        }
+        for preset, realm in expected.items():
+            with self.subTest(preset=preset):
+                result = self.realm(preset)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(realm, result.stdout.strip())
+
+    def test_manifest_rejects_unsafe_realm(self) -> None:
+        contract = json.loads(
+            (ROOT / "workspace" / "camouflage.json").read_text(encoding="utf-8")
+        )
+        contract["realm"] = "unsafe/re\nalm"
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = pathlib.Path(directory) / "camouflage.json"
+            manifest.write_text(json.dumps(contract), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(RENDERER), "--print-realm", str(manifest)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("preset realm is unsafe", result.stderr)
 
     def test_manifest_cannot_escape_the_container_site_root(self) -> None:
         result = subprocess.run(

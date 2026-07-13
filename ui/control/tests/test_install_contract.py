@@ -229,9 +229,13 @@ class InstallComposeContractTests(unittest.TestCase):
 
     def test_navigation_refreshes_server_backed_views(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
+        index = (repository / "ui" / "web" / "app" / "static" / "index.html").read_text(encoding="utf-8")
         app = (repository / "ui" / "web" / "app" / "static" / "app.js").read_text(encoding="utf-8")
         for call in ("loadOverview(true)", "loadCamouflage(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)", "loadConfiguration(true)"):
             self.assertIn(call, app)
+        self.assertIn('id="overview-camouflage-mode"', index)
+        self.assertIn('href="#camouflage"', index)
+        self.assertIn("renderOverviewCamouflage(normalizeCamouflage(camouflage))", app)
 
     def test_configuration_editor_is_read_only_by_default_and_validated_before_restart(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
