@@ -1,4 +1,4 @@
-ARG BASE_IMAGE
+ARG BASE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 FROM ${BASE_IMAGE} AS builder
 
@@ -6,7 +6,7 @@ RUN set -eux; \
     apk add --no-cache \
       autoconf automake build-base busybox-static gettext-dev gperf libtool \
       gnutls-dev libev-dev libseccomp-dev linux-headers meson ninja \
-      pax-utils pkgconf protobuf-c-compiler protobuf-c-dev readline-dev \
+      pax-utils pkgconf protobuf-c-compiler protobuf-c-dev py3-pyelftools readline-dev \
       talloc-dev tini-static
 
 COPY source /usr/src/ocserv
@@ -60,7 +60,7 @@ RUN set -eux; \
     fi; \
     { \
       find /usr/local -type f -perm -0100 | while IFS= read -r executable; do \
-        lddtree -l "${executable}" 2>/dev/null || true; \
+        lddtree -l "${executable}"; \
       done; \
     } | sort -u | while IFS= read -r library; do \
       case "${library}" in \
