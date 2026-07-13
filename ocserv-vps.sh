@@ -155,7 +155,7 @@ install_stack() {
   runtime_task bootstrap-vps.sh "${args[@]}"
 
   if [[ ${install_ui} -eq 1 ]]; then
-    prompt_value ui_version 'UI version' '0.4.16' OCSERV_UI_VERSION
+    prompt_value ui_version 'UI version' '0.4.17' OCSERV_UI_VERSION
     runtime_task install-ui.sh \
       --ui-version "${ui_version}" \
       --ui-image "ghcr.io/khorevaa/ocserv-vps-ui-web:${ui_version}" \
@@ -196,7 +196,7 @@ rollback_vpn() {
 install_ui() {
   require_root
   local version ssh_port
-  prompt_value version 'UI version' '0.4.16' OCSERV_UI_VERSION
+  prompt_value version 'UI version' '0.4.17' OCSERV_UI_VERSION
   prompt_value ssh_port 'SSH port for tunnel instructions' '22' OCSERV_SSH_PORT
   require_approval 'VPN/UI restart during UI installation' OCSERV_APPROVE_RESTART
   runtime_task install-ui.sh \
