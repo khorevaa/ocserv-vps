@@ -27,6 +27,7 @@ type fakeRunner struct {
 	failReload    bool
 	failTerminate bool
 	failConfig    bool
+	noSessions    bool
 	calls         [][]string
 	inputs        []string
 }
@@ -78,6 +79,9 @@ func (f *fakeRunner) Run(argv []string, stdin string) (commandOutput, error) {
 	case reflect.DeepEqual(command, []string{"show", "status"}):
 		return commandOutput{stdout: `{"Status":"online","uptime":1234,"Active sessions":2,"Private backend detail":"must-not-leak"}`}, nil
 	case reflect.DeepEqual(command, []string{"show", "users"}):
+		if f.noSessions {
+			return commandOutput{stdout: `[]`}, nil
+		}
 		return commandOutput{stdout: `[{"ID":41,"Username":"alice","Remote IP":"192.0.2.1","IPv4":"10.66.0.8","raw_connected_at":1783850400},{"ID":42,"Username":"alice","Remote IP":"192.0.2.2","IPv4":"10.66.0.9","raw_connected_at":1783850460}]`}, nil
 	case reflect.DeepEqual(command, []string{"reload"}):
 		if f.failReload {
@@ -359,6 +363,21 @@ func TestDeleteUserRemovesPasswordRecordAndTerminatesSessions(t *testing.T) {
 	}
 	_, err = service.deleteUser("alice")
 	assertControlError(t, err, 404, "user_not_found")
+}
+
+func TestDeleteUserWithoutActiveSessionsSkipsTerminationWithoutWarning(t *testing.T) {
+	service, runner, _ := testService(t)
+	runner.noSessions = true
+	result, err := service.deleteUser("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["sessions_terminated"] != true || result["warning"] != nil {
+		t.Fatalf("unexpected delete result without sessions: %#v", result)
+	}
+	if hasRunnerCall(runner.calls, []string{"terminate", "user", "alice"}) {
+		t.Fatalf("session termination must be skipped without active sessions: %#v", runner.calls)
+	}
 }
 
 func TestUserBackupExportAndMergeImportPreserveHashes(t *testing.T) {

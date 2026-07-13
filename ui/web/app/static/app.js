@@ -34,6 +34,14 @@
   };
 
   const el = (id) => document.getElementById(id);
+  const icon = (name) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    svg.setAttribute("aria-hidden", "true");
+    use.setAttribute("href", `#icon-${name}`);
+    svg.appendChild(use);
+    return svg;
+  };
   const bootView = el("boot-view");
   const appView = el("app-view");
   const sidebar = el("sidebar");
@@ -680,8 +688,6 @@
     el("ui-version").textContent = textOrDash(data && data.version);
     el("ui-image").textContent = textOrDash(data && data.image);
     const access = data && typeof data.access_secret === "object" ? data.access_secret : {};
-    el("ui-access-mask").textContent = access.masked || "••••••••••••••••";
-    el("ui-access-state").textContent = access.configured ? "Секрет настроен" : "Нет данных";
     el("copy-ui-secret-button").disabled = !access.configured;
     const sshCommand = data && typeof data.ssh_command === "string" ? data.ssh_command : "";
     el("ui-ssh-command").textContent = textOrDash(sshCommand);
@@ -831,18 +837,20 @@
       actions.className = "user-actions";
       const rotateButton = document.createElement("button");
       rotateButton.type = "button";
-      rotateButton.className = "button row-action";
+      rotateButton.className = "button row-action row-action--icon";
       rotateButton.dataset.action = "rotate-password";
       rotateButton.dataset.username = user.username;
       rotateButton.setAttribute("aria-label", `Изменить пароль пользователя ${user.username}`);
-      rotateButton.textContent = "Изменить пароль";
+      rotateButton.title = "Изменить пароль";
+      rotateButton.appendChild(icon("key"));
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
-      deleteButton.className = "button row-action row-action--danger";
+      deleteButton.className = "button row-action row-action--icon row-action--danger";
       deleteButton.dataset.action = "delete-user";
       deleteButton.dataset.username = user.username;
       deleteButton.setAttribute("aria-label", `Удалить пользователя ${user.username}`);
-      deleteButton.textContent = "Удалить";
+      deleteButton.title = "Удалить";
+      deleteButton.appendChild(icon("trash"));
       actions.append(rotateButton, deleteButton);
       actionsCell.appendChild(actions);
 

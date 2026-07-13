@@ -488,7 +488,7 @@ func (s *controlService) importUsers(raw any, mode string) (map[string]any, erro
 			return nil, controlFailure(500, "snapshot_cleanup_failed", "The password snapshot could not be removed safely.")
 		}
 		for username := range affected {
-			if _, terminateErr := s.runOCCTL("terminate", "user", username); terminateErr != nil {
+			if !s.terminateUserSessions(username) {
 				sessionsTerminated = false
 			}
 		}
@@ -568,7 +568,7 @@ func (s *controlService) deleteUser(username string) (map[string]any, error) {
 		return nil, controlFailure(500, "snapshot_cleanup_failed", "The password snapshot could not be removed safely.")
 	}
 	result := map[string]any{"username": username, "deleted": true, "sessions_terminated": true}
-	if _, terminateErr := s.runOCCTL("terminate", "user", username); terminateErr != nil {
+	if !s.terminateUserSessions(username) {
 		result["sessions_terminated"] = false
 		result["warning"] = "session_termination_failed"
 	}
@@ -594,13 +594,22 @@ func (s *controlService) rotatePassword(username string, terminate bool) (map[st
 	}
 	result["sessions_terminated"] = false
 	if terminate {
-		if _, terminateErr := s.runOCCTL("terminate", "user", username); terminateErr != nil {
+		if !s.terminateUserSessions(username) {
 			result["warning"] = "session_termination_failed"
 		} else {
 			result["sessions_terminated"] = true
 		}
 	}
 	return result, nil
+}
+
+func (s *controlService) terminateUserSessions(username string) bool {
+	data, err := s.occtlJSON("show", "users")
+	if err == nil && !contains(activeUsernames(data), username) {
+		return true
+	}
+	_, err = s.runOCCTL("terminate", "user", username)
+	return err == nil
 }
 
 func (s *controlService) changePassword(username string) (map[string]any, error) {

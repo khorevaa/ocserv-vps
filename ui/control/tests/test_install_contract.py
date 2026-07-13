@@ -276,8 +276,13 @@ class InstallComposeContractTests(unittest.TestCase):
         static = repository / "ui" / "web" / "app" / "static"
         index = (static / "index.html").read_text(encoding="utf-8")
         app = (static / "app.js").read_text(encoding="utf-8")
+        styles = (static / "styles.css").read_text(encoding="utf-8")
         web = (repository / "ui" / "web" / "server.go").read_text(encoding="utf-8")
         control = (repository / "ui" / "control" / "service.go").read_text(encoding="utf-8")
+
+        sidebar_nav = index.split('<nav class="sidebar-nav">', 1)[1].split("</nav>", 1)[0]
+        self.assertLess(sidebar_nav.index('data-view="overview"'), sidebar_nav.index('data-view="users"'))
+        self.assertLess(sidebar_nav.index('data-view="users"'), sidebar_nav.index('data-view="connections"'))
 
         for element_id in (
             'id="export-users-button"',
@@ -304,6 +309,22 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("connection.cli", app)
         self.assertIn("connection.text", app)
         self.assertIn('method: "DELETE"', app)
+        self.assertIn('id="icon-trash"', index)
+        self.assertIn('rotateButton.appendChild(icon("key"))', app)
+        self.assertIn('deleteButton.appendChild(icon("trash"))', app)
+        self.assertIn('rotateButton.title = "Изменить пароль"', app)
+        self.assertIn('deleteButton.title = "Удалить"', app)
+        self.assertNotIn('id="ui-access-mask"', index)
+        self.assertNotIn('id="ui-access-state"', index)
+        self.assertNotIn(".secret-mask", styles)
+        user_actions = styles.split(".user-actions {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: inline-flex;", user_actions)
+        self.assertIn("flex-wrap: nowrap;", user_actions)
+        self.assertIn("#credential-modal .config-output", styles)
+        self.assertIn("height: 112px;", styles)
+        self.assertIn("overflow-y: hidden;", styles)
+        self.assertIn('spellcheck="false" wrap="off"', index)
+        self.assertIn("#credential-modal .credential-list", styles)
         self.assertEqual(app.count("localStorage.setItem"), 1)
         self.assertIn('localStorage.setItem("ocserv-ui-theme"', app)
         self.assertIn('path == "/api/v1/users/export"', web)
