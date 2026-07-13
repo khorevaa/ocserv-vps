@@ -252,7 +252,7 @@ func TestUIInfoMasksAccessSecret(t *testing.T) {
 	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+strings.Repeat("A", 64)+`"}`, nil, "")
 	cookie := access.Result().Cookies()[0]
 	response := perform(app, "GET", "/api/v1/ui", "", cookie, "")
-	if response.Code != 200 || !strings.Contains(response.Body.String(), "ocserv-vps-ui:0.4.5") || strings.Contains(response.Body.String(), strings.Repeat("A", 64)) {
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "ocserv-vps-ui-web:0.4.5") || strings.Contains(response.Body.String(), strings.Repeat("A", 64)) {
 		t.Fatalf("ui info=%d %s", response.Code, response.Body.String())
 	}
 }
