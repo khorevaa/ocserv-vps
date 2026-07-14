@@ -194,8 +194,8 @@ func (s *controlService) camouflageInfo() (camouflageRuntimeInfo, error) {
 		mode = "advanced"
 		advanced.Container = "ocserv-camouflage-site"
 		advanced.CoverPort = 8444
-		advanced.BrowserProtocol = "HTTP/2"
-		advanced.VPNProtocol = "HTTP/1.1 + CSTP"
+		advanced.BrowserProtocol = "ALPN h2 / http/1.1"
+		advanced.VPNProtocol = "other / no ALPN + CSTP"
 		advanced.SiteMount = "/srv/camouflage:ro"
 		advanced.Site = site
 	}

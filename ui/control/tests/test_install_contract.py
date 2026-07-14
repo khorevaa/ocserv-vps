@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -573,6 +574,9 @@ class InstallComposeContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        deployer = (repository / "scripts" / "deploy-release.sh").read_text(
+            encoding="utf-8"
+        )
         status = (repository / "scripts" / "status.sh").read_text(encoding="utf-8")
         uninstaller = (repository / "scripts" / "uninstall.sh").read_text(
             encoding="utf-8"
@@ -597,6 +601,8 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("render_advanced_camouflage_nginx", bootstrap)
         self.assertIn("verify_advanced_camouflage_site", bootstrap)
         self.assertIn("cover site did not negotiate HTTP/2", common)
+        self.assertIn("cover site did not negotiate HTTP/1.1", common)
+        self.assertIn("--http1.1", common)
         self.assertIn("pull_camouflage_image", bootstrap)
         self.assertIn("test_camouflage_image_config", bootstrap)
         self.assertIn("container_name: ocserv-camouflage-site", common)
@@ -622,12 +628,102 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertNotIn("load_module", nginx)
         self.assertIn("try_files \\$uri \\$uri/ /index.html", nginx)
         self.assertIn("$ssl_preread_alpn_protocols", nginx)
+        self.assertIn(
+            "~^1:(?:[^,]+,)*h2(?:,|\\$) 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};",
+            nginx,
+        )
+        self.assertIn(
+            "~^1:(?:[^,]+,)*http/1\\\\.1(?:,|\\$) 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};",
+            nginx,
+        )
+        self.assertIn(
+            "~^1: 127.0.0.1:${OCSERV_CAMOUFLAGE_TCP_PORT};",
+            nginx,
+        )
+        self.assertIn(
+            "default 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};",
+            nginx,
+        )
         self.assertNotIn("proxy_ssl_", nginx)
         self.assertNotIn("CAMOUFLAGE_DOWNLOAD_URL", nginx)
         self.assertNotIn("proxy_pass https://127.0.0.1", nginx)
         self.assertIn("UDP/DTLS: disabled (udp-port = 0, no listener)", status)
         self.assertIn('"${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"', uninstaller)
         self.assertNotIn("systemctl reload nginx", uninstaller)
+        self.assertIn(
+            'cp -a "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" "${BACKUP_DIR}/camouflage-nginx.conf"',
+            deployer,
+        )
+        self.assertIn(
+            'render_advanced_camouflage_nginx "${DOMAIN}" "${VPN_PORT}"',
+            deployer,
+        )
+        self.assertIn(
+            'test_camouflage_image_config "${CAMOUFLAGE_IMAGE}"', deployer
+        )
+        self.assertGreaterEqual(
+            deployer.count("--force-recreate camouflage-site"), 2
+        )
+        self.assertIn('verify_advanced_camouflage_site "${DOMAIN}"', deployer)
+        backup = deployer.index('create_stack_backup "deploy-${VERSION}"')
+        render = deployer.index(
+            'render_advanced_camouflage_nginx "${DOMAIN}" "${VPN_PORT}"'
+        )
+        nginx_test = deployer.index(
+            'test_camouflage_image_config "${CAMOUFLAGE_IMAGE}"'
+        )
+        activation = deployer.index('info "Activating ${NEW_IMAGE}')
+        self.assertLess(backup, render)
+        self.assertLess(render, nginx_test)
+        self.assertLess(nginx_test, activation)
+        restore = deployer.split("restore_previous_image() {", 1)[1].split(
+            "\non_exit()", 1
+        )[0]
+        self.assertIn('"${BACKUP_DIR}/camouflage-nginx.conf"', restore)
+        self.assertIn(
+            'mv -f "${camouflage_temporary}" "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"',
+            restore,
+        )
+        self.assertIn("--force-recreate camouflage-site", restore)
+        active = deployer.split('info "Activating ${NEW_IMAGE}', 1)[1]
+        self.assertLess(
+            active.index("--force-recreate camouflage-site"),
+            active.index("health_check_stack"),
+        )
+        self.assertLess(
+            active.index('verify_advanced_camouflage_site "${DOMAIN}"'),
+            active.index("write_state"),
+        )
+
+    def test_advanced_camouflage_alpn_patterns_match_complete_protocol_ids(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        nginx = common.split("render_advanced_camouflage_nginx() {", 1)[1].split(
+            "verify_advanced_camouflage_site() {", 1
+        )[0]
+
+        def rendered_pattern(marker: str) -> re.Pattern[str]:
+            line = next(line.strip() for line in nginx.splitlines() if marker in line)
+            pattern = line.split(maxsplit=1)[0].removeprefix("~")
+            pattern = pattern.replace("\\\\", "\\").replace("\\$", "$")
+            return re.compile(pattern)
+
+        h2 = rendered_pattern(")*h2(?:")
+        http1 = rendered_pattern(")*http/1")
+        for value in ("1:h2", "1:h2,http/1.1", "1:custom,h2"):
+            self.assertIsNotNone(h2.match(value), value)
+        for value in ("1:vpn-h2", "1:h2-test", "1:custom", "0:h2", "1:"):
+            self.assertIsNone(h2.match(value), value)
+        for value in ("1:http/1.1", "1:h2,http/1.1", "1:custom,http/1.1"):
+            self.assertIsNotNone(http1.match(value), value)
+        for value in (
+            "1:vpn-http/1.1",
+            "1:http/1.1-test",
+            "1:custom",
+            "0:http/1.1",
+            "1:",
+        ):
+            self.assertIsNone(http1.match(value), value)
 
     def test_bootstrap_prints_generated_initial_vpn_credentials(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]

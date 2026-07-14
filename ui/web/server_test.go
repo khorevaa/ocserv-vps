@@ -92,7 +92,7 @@ func startFakeControl(t *testing.T, path string) {
 						"tcp_port": 8443, "udp_port": 0, "listen_host": "127.0.0.1", "no_udp": true, "proxy_protocol": true,
 						"advanced": map[string]any{
 							"enabled": true, "container": "ocserv-camouflage-site", "cover_port": 8444,
-							"browser_protocol": "HTTP/2", "vpn_protocol": "HTTP/1.1 + CSTP", "site_mount": "/srv/camouflage:ro",
+							"browser_protocol": "ALPN h2 / http/1.1", "vpn_protocol": "other / no ALPN + CSTP", "site_mount": "/srv/camouflage:ro",
 							"site": map[string]any{"source": "preset", "preset": "owncloud", "name": "ownCloud"},
 						},
 					}

@@ -149,6 +149,116 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn("Refuse to overwrite an existing version tag", server_workflow)
         self.assertNotIn("OCSERV_IMAGE}\" == 'ghcr.io/khorevaa/ocserv-vps-server:1.5.0'", ui_workflow)
 
+    @unittest.skipUnless(BASH, "bash is required for deploy rollback tests")
+    def test_deploy_failure_restores_camouflage_nginx_config_and_remounts_it(self) -> None:
+        scenario = r'''
+set -uo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "${root}"' EXIT
+mkdir -p "${root}/stack" "${root}/camouflage"
+OCSERV_STATE_FILE="${root}/state"
+OCSERV_COMPOSE_FILE="${root}/compose.yaml"
+OCSERV_ENV_FILE="${root}/stack.env"
+OCSERV_STACK_ROOT="${root}/stack"
+OCSERV_CAMOUFLAGE_ROOT="${root}/camouflage"
+OCSERV_CAMOUFLAGE_NGINX_CONFIG="${OCSERV_CAMOUFLAGE_ROOT}/nginx.conf"
+OCSERV_CONTAINER=ocserv-vps
+touch "${OCSERV_STATE_FILE}" "${OCSERV_COMPOSE_FILE}"
+printf '%s\n' \
+  'OCSERV_IMAGE=ghcr.io/khorevaa/ocserv-vps-server@sha256:old' \
+  'OCSERV_CAMOUFLAGE_IMAGE=nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  > "${OCSERV_ENV_FILE}"
+printf '%s\n' old > "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+
+die() { printf 'expected failure: %s\n' "$*" >&2; exit 1; }
+warn() { :; }
+info() { :; }
+require_root() { :; }
+validate_version() { :; }
+validate_registry_image() { :; }
+require_command() { :; }
+docker() { :; }
+acquire_stack_locks() { :; }
+ensure_openconnect_probe_tools() { :; }
+state_get() {
+  case "$1" in
+    current_version) printf '%s\n' v0.1.16 ;;
+    current_image) printf '%s\n' 'ghcr.io/khorevaa/ocserv-vps-server@sha256:old' ;;
+    domain) printf '%s\n' vpn.example.com ;;
+    vpn_network) printf '%s\n' 10.66.0.0/24 ;;
+    vpn_port) printf '%s\n' 443 ;;
+  esac
+}
+pull_verified_image() {
+  RESOLVED_IMAGE='ghcr.io/khorevaa/ocserv-vps-server@sha256:new'
+  RESOLVED_SOURCE_SHA='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+}
+require_ui_control_compatibility() { :; }
+create_stack_backup() { LAST_BACKUP="${root}/backup"; mkdir -p "${LAST_BACKUP}"; }
+ensure_vpn_journal_config() { :; }
+test_image_config() { :; }
+render_advanced_camouflage_nginx() {
+  local temporary
+  temporary="$(mktemp "${OCSERV_CAMOUFLAGE_ROOT}/.nginx.conf.test.XXXXXX")"
+  printf '%s\n' new > "${temporary}"
+  mv -f "${temporary}" "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+}
+test_camouflage_image_config() {
+  [[ "$1" == nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]]
+  grep -qx new "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+}
+write_stack_env() { :; }
+compose() { printf '%s\n' "$*" >> "${root}/compose.log"; }
+health_check_stack() {
+  [[ "$1" == 'ghcr.io/khorevaa/ocserv-vps-server@sha256:old' ]]
+}
+health_check_ui_stack() { :; }
+delete_password_user() { :; }
+print_ui_access_info_if_installed() { :; }
+
+set +e
+(
+  set -euo pipefail
+  source "${TEST_DEPLOY_SCRIPT}" \
+    --version v0.1.17 \
+    --image ghcr.io/khorevaa/ocserv-vps-server:v0.1.17 \
+    --approve-restart
+)
+status=$?
+set -e
+[[ "${status}" -ne 0 ]]
+grep -qx old "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -qx old "${root}/backup/camouflage-nginx.conf"
+[[ "$(grep -c -- '--force-recreate camouflage-site' "${root}/compose.log")" == 2 ]]
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / "deploy-rollback-test.sh"
+            script.write_text(scenario, encoding="utf-8")
+            environment = os.environ.copy()
+            environment["TEST_DEPLOY_SCRIPT"] = (
+                self.repository / "scripts" / "deploy-release.sh"
+            ).as_posix()
+            if os.name == "nt":
+                environment["PATH"] = ";".join(
+                    (
+                        "C:/Program Files/Git/usr/bin",
+                        "C:/Program Files/Git/bin",
+                        environment.get("PATH", ""),
+                    )
+                )
+            result = subprocess.run(
+                [BASH, str(script)],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+
     @unittest.skipUnless(BASH, "bash is required for manager resolver tests")
     def test_empty_image_version_selects_latest_common_release_tag(self) -> None:
         function_prefix = self.manager.split("prompt_optional() {", 1)[0]
@@ -312,6 +422,10 @@ render_advanced_camouflage_nginx vpn.example.com 443
 grep -q 'ssl_preread on;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
 grep -q 'proxy_protocol on;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
 grep -q 'http2 on;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -Fq '~^1:(?:[^,]+,)*h2(?:,|$) 127.0.0.1:8444;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -Fq '~^1:(?:[^,]+,)*http/1\.1(?:,|$) 127.0.0.1:8444;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -Fq '~^1: 127.0.0.1:8443;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
+grep -Fq 'default 127.0.0.1:8444;' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
 grep -q "root ${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT};" "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
 grep -q 'location = /webman/index.cgi' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
 grep -q 'location = /webapi/entry.cgi' "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"
