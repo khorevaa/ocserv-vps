@@ -211,6 +211,18 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("- /etc/letsencrypt:/etc/letsencrypt:ro", control_block)
         self.assertIn("network_mode: none", control_block)
 
+    def test_bootstrap_retries_transient_certificate_request_failures(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        bootstrap = (repository / "scripts" / "bootstrap-vps.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("request_certificate()", bootstrap)
+        self.assertIn("for attempt in 1 2 3", bootstrap)
+        self.assertIn("Certificate request failed after 3 attempts", bootstrap)
+        self.assertIn("request_certificate --webroot", bootstrap)
+        self.assertIn("request_certificate --standalone", bootstrap)
+
     def test_ui_upgrade_is_transactional_and_preserves_access(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
         controller = (repository / "ocserv-vps.sh").read_text(encoding="utf-8")
