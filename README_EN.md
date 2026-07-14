@@ -10,10 +10,12 @@ A ready-to-run [ocserv](https://www.infradead.org/ocserv/) VPN server for your o
 
 - installs ocserv, Docker, and required system packages on a fresh Debian or Ubuntu server;
 - obtains and renews a Let's Encrypt TLS certificate;
-- optionally enables Camouflage so unauthorized requests resemble an ordinary web server;
-- creates VPN users with secure one-time passwords and prints the initial VPN credentials after installation;
-- displays server health, active connections, and the event journal;
+- supports native and advanced Camouflage with locally served cover sites;
+- creates and deletes users, rotates passwords, and imports or exports accounts;
+- produces one-time connection profiles for OpenConnect, phones, and routers;
+- displays server health, active connections, the event journal, and paginated container logs;
 - bounds the VPN journal: after 4 MiB it retains the newest 10,000 events;
+- views, downloads, and safely edits `ocserv.conf`, validating it before restart;
 - updates and rolls back the server image without manual configuration edits;
 - provides a web panel without a public HTTP port or Docker socket access;
 - supports both an interactive menu and automation-friendly commands.
@@ -23,7 +25,7 @@ A ready-to-run [ocserv](https://www.infradead.org/ocserv/) VPN server for your o
 - an `amd64` VPS running Debian or Ubuntu;
 - root access or permission to run commands with `sudo`;
 - a domain with an A record pointing to the server's public IP;
-- available TCP/UDP VPN ports and a working SSH connection.
+- available VPN ports and a working SSH connection; advanced Camouflage requires TCP/443 and disables UDP/DTLS.
 
 > Installation changes firewall rules and restarts network services. Keep the current SSH session open until the VPN check has completed.
 
@@ -141,9 +143,9 @@ Run `sudo ocserv-vps` without arguments to open the interactive menu.
 
 ## Web panel
 
-The panel displays server and certificate health, manages users, lists active connections, and can terminate selected sessions.
+The panel displays server and Camouflage status, manages users, terminates selected VPN sessions, shows container logs, and safely edits `ocserv.conf`.
 
-The status page can copy the VPN domain, the ready-to-use SSH command for the private panel, and the access secret. The TLS card shows the certificate issuer and can request forced renewal through Let's Encrypt. Renewal runs through an isolated host-level systemd bridge, so the panel containers remain without network or Docker socket access.
+The status page can copy the VPN domain, the ready-to-use SSH command for the private panel, and the access secret. The TLS card shows the certificate issuer and can request forced renewal through Let's Encrypt. Host operations and log collection use isolated, narrowly scoped systemd bridges, so the panel containers remain without network or Docker socket access.
 
 ### Protected access
 
@@ -153,6 +155,22 @@ The status page can copy the VPN domain, the ready-to-use SSH command for the pr
 
 ![VPN server, certificate, and management panel status](docs/images/ui-overview.png)
 
+### Camouflage status
+
+![Advanced Camouflage mode details](docs/images/ui-camouflage.png)
+
+This view shows the public endpoint, TCP and UDP/DTLS state, Nginx routing, and the selected cover-site source. The Camouflage secret is revealed only through a separate protected request recorded in the UI audit log.
+
+### User management
+
+![Managing VPN users](docs/images/ui-users.png)
+
+Users can be created, deleted, or issued a new password; deletion also terminates their active sessions. Export and Import move users between installations without changing passwords. Import merges with the existing list by default; full replacement must be enabled explicitly and removes users absent from the file. The exported JSON contains password hashes and must be handled as a sensitive backup.
+
+After creating a user or rotating a password, the panel displays the password once, an OpenConnect CLI command, and a ready-to-use text profile for a phone or router. The panel does not persist the plaintext password.
+
+![One-time connection profile for a new user](docs/images/ui-credentials.png)
+
 ### Active connections
 
 ![Active VPN connections](docs/images/ui-connections.png)
@@ -161,13 +179,17 @@ The status page can copy the VPN domain, the ready-to-use SSH command for the pr
 
 ![VPN connection and disconnection journal](docs/images/ui-journal.png)
 
-### User management
+### Server logs
 
-![Managing VPN users](docs/images/ui-users.png)
+![Paginated container log viewer](docs/images/ui-logs.png)
 
-After creating a user or rotating a password, the panel displays a one-time text connection profile with the server address, AnyConnect protocol, username, and password. It can be copied or downloaded as a `.txt` file for a phone or router. The panel does not persist the plaintext password.
+A snapshot of VPN server, Control, and Web UI container logs can be filtered by source, sorted by time, and viewed page by page. The panel does not need access to the Docker socket.
 
-The Export and Import actions move users between installations without changing their passwords. Import merges with the existing list by default; full replacement must be enabled explicitly and removes users absent from the file. The exported JSON contains password hashes and must be handled as a sensitive backup.
+### ocserv configuration
+
+![Viewing the ocserv configuration](docs/images/ui-configuration.png)
+
+By default, `ocserv.conf` opens read-only. It can be downloaded, edited, or replaced with an uploaded file; before an atomic replacement, the panel checks the revision and syntax, and restores the previous configuration if restart fails.
 
 The panel does not expose a TCP port on the VPS. To connect, run:
 
