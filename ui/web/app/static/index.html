@@ -133,6 +133,10 @@
             <svg aria-hidden="true"><use href="#icon-overview"></use></svg>
             <span>Состояние системы</span>
           </a>
+          <a class="nav-item" href="#camouflage" data-view="camouflage">
+            <svg aria-hidden="true"><use href="#icon-shield"></use></svg>
+            <span>Режим маскировки</span>
+          </a>
           <a class="nav-item" href="#users" data-view="users">
             <svg aria-hidden="true"><use href="#icon-users"></use></svg>
             <span>Пользователи</span>
@@ -218,6 +222,10 @@
                 <div><dt>Время работы</dt><dd id="service-uptime">—</dd></div>
                 <div><dt>Порт</dt><dd id="vpn-port">—</dd></div>
                 <div><dt>VPN-сеть</dt><dd id="vpn-network" class="code-value">—</dd></div>
+                <div>
+                  <dt>Режим маскировки</dt>
+                  <dd><a id="overview-camouflage-mode" class="camouflage-overview-link" href="#camouflage">Загрузка…</a></dd>
+                </div>
               </dl>
             </article>
 
@@ -268,6 +276,104 @@
                 </div>
               </dl>
             </article>
+          </div>
+        </section>
+
+        <section id="camouflage-panel" class="view-panel is-hidden" data-panel="camouflage" aria-labelledby="camouflage-title">
+          <div class="page-header">
+            <div>
+              <h1 id="camouflage-title">Режим маскировки</h1>
+              <p class="page-subtitle">Текущий режим запуска, параметры скрытого доступа и продвинутой маскировки</p>
+            </div>
+            <button id="camouflage-refresh" class="button button--secondary" type="button">
+              <svg aria-hidden="true"><use href="#icon-refresh"></use></svg>
+              <span>Обновить</span>
+            </button>
+          </div>
+
+          <div id="camouflage-error" class="alert alert--danger is-hidden" role="alert"></div>
+
+          <article class="camouflage-summary" aria-live="polite">
+            <div id="camouflage-mode-icon" class="camouflage-mode-icon" aria-hidden="true">
+              <svg><use href="#icon-shield"></use></svg>
+            </div>
+            <div>
+              <div class="service-title-row">
+                <h2 id="camouflage-mode-name">Загрузка…</h2>
+                <span id="camouflage-mode-badge" class="status-badge status-badge--neutral">—</span>
+              </div>
+              <p id="camouflage-mode-description">Получаем параметры запуска сервера.</p>
+            </div>
+          </article>
+
+          <div class="camouflage-grid">
+            <article class="info-card">
+              <div class="card-heading">
+                <h2>Скрытый режим ocserv</h2>
+                <span id="camouflage-native-state" class="status-dot-label"><i></i><span>—</span></span>
+              </div>
+              <dl class="detail-list">
+                <div><dt>Публичная точка входа</dt><dd id="camouflage-public-endpoint" class="code-value">—</dd></div>
+                <div><dt>Camouflage</dt><dd id="camouflage-enabled">—</dd></div>
+                <div><dt>Realm</dt><dd id="camouflage-realm" class="code-value">—</dd></div>
+                <div>
+                  <dt>Секрет скрытого режима</dt>
+                  <dd class="secret-value-row">
+                    <code id="camouflage-secret-value" class="command-value">—</code>
+                    <button id="camouflage-secret-toggle" class="button button--secondary button--compact" type="button" disabled>Показать</button>
+                    <button id="camouflage-secret-copy" class="copy-icon-button is-hidden" type="button" aria-label="Копировать секрет скрытого режима" title="Копировать секрет">
+                      <svg aria-hidden="true"><use href="#icon-copy"></use></svg>
+                    </button>
+                  </dd>
+                </div>
+              </dl>
+              <p class="sensitive-note">Секрет раскрывается отдельным защищённым запросом и фиксируется в журнале аудита UI.</p>
+            </article>
+
+            <article class="info-card">
+              <div class="card-heading">
+                <h2>Транспорт</h2>
+                <span id="camouflage-advanced-state" class="card-label">—</span>
+              </div>
+              <dl class="detail-list">
+                <div><dt>ocserv слушает</dt><dd id="camouflage-ocserv-listener" class="code-value">—</dd></div>
+                <div><dt>TCP</dt><dd id="camouflage-tcp-state">—</dd></div>
+                <div><dt>UDP / DTLS</dt><dd id="camouflage-udp-state">—</dd></div>
+                <div><dt>PROXY protocol</dt><dd id="camouflage-proxy-state">—</dd></div>
+              </dl>
+            </article>
+
+            <article id="camouflage-advanced-card" class="info-card info-card--wide is-hidden">
+              <div class="card-heading">
+                <h2>Опции продвинутой маскировки</h2>
+                <span class="card-label">Nginx sidecar</span>
+              </div>
+              <dl class="detail-list advanced-options-list">
+                <div><dt>Источник сайта</dt><dd id="camouflage-site-source">—</dd></div>
+                <div><dt>Контейнер</dt><dd id="camouflage-container" class="code-value">—</dd></div>
+                <div><dt>Монтирование сайта</dt><dd id="camouflage-site-mount" class="code-value">—</dd></div>
+                <div><dt>Вход Nginx</dt><dd id="camouflage-nginx-entry" class="code-value">—</dd></div>
+                <div><dt>Браузерный трафик</dt><dd id="camouflage-browser-route" class="code-value">—</dd></div>
+                <div><dt>VPN-трафик</dt><dd id="camouflage-vpn-route" class="code-value">—</dd></div>
+              </dl>
+            </article>
+
+            <article id="camouflage-preview-card" class="info-card info-card--wide camouflage-preview-card is-hidden">
+              <div class="card-heading camouflage-preview-heading">
+                <div>
+                  <h2>Превью сайта маскировки</h2>
+                  <p>Живая публичная заглушка открыта в изолированном режиме без скриптов и отправки форм.</p>
+                </div>
+                <a id="camouflage-preview-link" class="button button--secondary" href="#" target="_blank" rel="noopener noreferrer">Открыть сайт</a>
+              </div>
+              <div class="camouflage-preview-frame">
+                <iframe id="camouflage-preview" title="Превью сайта маскировки" sandbox="" referrerpolicy="no-referrer" loading="lazy"></iframe>
+              </div>
+            </article>
+
+            <div id="camouflage-preview-unavailable" class="alert info-card--wide">
+              Превью сайта доступно только при включённой продвинутой маскировке.
+            </div>
           </div>
         </section>
 

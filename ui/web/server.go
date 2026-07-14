@@ -43,12 +43,12 @@ type requestContext struct {
 	authed  bool
 }
 
-func securityHeaders(header http.Header) {
+func securityHeaders(header http.Header, vpnDomain string) {
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("X-Frame-Options", "DENY")
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-	header.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'")
+	header.Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; base-uri 'none'; frame-ancestors 'none'; frame-src https://%s; form-action 'self'; object-src 'none'", vpnDomain))
 }
 
 func noStore(header http.Header) {
@@ -81,7 +81,7 @@ func bootstrapPath(path string) bool {
 }
 
 func (a *application) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	securityHeaders(writer.Header())
+	securityHeaders(writer.Header(), a.config.VPNDomain)
 	path := request.URL.Path
 	if path == "/api/v1/health" && request.Method == http.MethodGet {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
@@ -122,6 +122,10 @@ func (a *application) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		a.uiInfo(writer)
 	case path == "/api/v1/ui/access-secret" && request.Method == http.MethodPost:
 		a.revealAccessSecret(writer, request, context)
+	case path == "/api/v1/camouflage" && request.Method == http.MethodGet:
+		a.camouflageInfo(writer)
+	case path == "/api/v1/camouflage/secret" && request.Method == http.MethodPost:
+		a.revealCamouflageSecret(writer, request, context)
 	case path == "/api/v1/service/restart" && request.Method == http.MethodPost:
 		a.restartService(writer, request, context)
 	case path == "/api/v1/certificate/renew" && request.Method == http.MethodPost:
@@ -341,6 +345,33 @@ func (a *application) revealAccessSecret(writer http.ResponseWriter, request *ht
 	}
 	a.recordAudit(auditRecord{Actor: "operator", Action: "copy_ui_access_secret", Success: true, Remote: remoteIdentity(request)})
 	writeJSON(writer, http.StatusOK, map[string]string{"access_secret": secret})
+}
+
+func (a *application) camouflageInfo(writer http.ResponseWriter) {
+	noStore(writer.Header())
+	raw, err := a.control.request("camouflage_info", nil)
+	a.controlResponse(writer, raw, err, func(value json.RawMessage) (any, error) {
+		return camouflageForWeb(value, a.config.VPNDomain)
+	})
+}
+
+func (a *application) revealCamouflageSecret(writer http.ResponseWriter, request *http.Request, context requestContext) {
+	noStore(writer.Header())
+	if !a.requireCSRF(writer, request, context) {
+		return
+	}
+	raw, err := a.control.request("camouflage_secret", nil)
+	if err != nil {
+		a.controlResponse(writer, raw, err, nil)
+		return
+	}
+	secret, err := camouflageSecretForWeb(raw)
+	if err != nil {
+		writeJSON(writer, http.StatusBadGateway, map[string]string{"detail": "invalid control response"})
+		return
+	}
+	a.recordAudit(auditRecord{Actor: "operator", Action: "reveal_camouflage_secret", Success: true, Remote: remoteIdentity(request)})
+	writeJSON(writer, http.StatusOK, map[string]string{"secret": secret})
 }
 
 func (a *application) restartService(writer http.ResponseWriter, request *http.Request, context requestContext) {

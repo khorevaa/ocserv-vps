@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "workspace",
+  "name": "Orbit Workspace",
+  "realm": "Orbit Workspace",
+  "document": "index.html",
+  "entry_paths": ["/", "/login"],
+  "requests_on_open": [
+    {
+      "method": "GET",
+      "target": "/assets/workspace.css?v=2.20",
+      "response": {"status": 204, "content_type": "text/css; charset=utf-8", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/assets/workspace.js?v=2.20",
+      "response": {"status": 204, "content_type": "text/javascript; charset=utf-8", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/favicon.svg",
+      "response": {"status": 204, "content_type": "image/svg+xml", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/api/v2/buildinfo",
+      "response": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"version\":\"v2.20.2\",\"dashboard_url\":\"/\",\"telemetry\":false,\"workspace_proxy\":false}"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/api/v2/appearance",
+      "response": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"application_name\":\"Orbit Workspace\",\"logo_url\":\"\",\"support_links\":[]}"
+      }
+    }
+  ],
+  "form_request": {
+    "method": "POST",
+    "target": "/api/v2/users/login",
+    "content_type": "application/json",
+    "fixed_body": "{\"email\":\"\",\"password\":\"\"}",
+    "response": {
+      "status": 503,
+      "content_type": "application/json; charset=utf-8",
+      "body": "{\"message\":\"workspace temporarily unavailable\"}"
+    }
+  }
+}

@@ -41,6 +41,7 @@ var (
 	domainPattern           = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 	timestampPattern        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`)
 	camouflageSecretPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{16,128}$`)
+	camouflageRealmPattern  = regexp.MustCompile(`^[A-Za-z0-9][-A-Za-z0-9._ ]{0,63}$`)
 )
 
 type controlService struct {
@@ -80,6 +81,8 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 	allowed := map[string]map[string]bool{
 		"healthcheck":           {"request_id": true, "action": true},
 		"overview":              {"request_id": true, "action": true},
+		"camouflage_info":       {"request_id": true, "action": true},
+		"camouflage_secret":     {"request_id": true, "action": true},
 		"list_users":            {"request_id": true, "action": true},
 		"export_users":          {"request_id": true, "action": true},
 		"import_users":          {"request_id": true, "action": true, "backup": true, "mode": true},
@@ -109,6 +112,10 @@ func (s *controlService) dispatch(request map[string]any) (any, error) {
 		return s.backendHealth()
 	case "overview":
 		return s.overview()
+	case "camouflage_info":
+		return s.camouflageInfo()
+	case "camouflage_secret":
+		return s.camouflageSecret()
 	case "list_users":
 		return s.listUsers()
 	case "export_users":

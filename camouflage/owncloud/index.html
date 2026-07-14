@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; style-src 'nonce-camouflage-preset'; script-src 'nonce-camouflage-preset'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'">
+  <title>ownCloud</title>
+  <link rel="icon" href="/core/img/favicon.svg">
+  <style nonce="camouflage-preset">
+:root {
+  color-scheme: dark;
+  font-family: "Open Sans", "Segoe UI", Arial, sans-serif;
+  color: #fff;
+  background: #173d68;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; }
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(125deg, rgba(16, 55, 95, .96), rgba(29, 110, 151, .74)),
+    radial-gradient(circle at 70% 20%, #3a91b4, #173d68 65%);
+}
+
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input { font: inherit; }
+
+.cloudscape {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cloudscape::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .18;
+  background-image:
+    radial-gradient(circle at 12px 12px, rgba(255, 255, 255, .42) 0 1px, transparent 1.5px);
+  background-size: 35px 35px;
+  mask-image: linear-gradient(to bottom, transparent, #000 35%, transparent 88%);
+}
+
+.cloud {
+  position: absolute;
+  width: 280px;
+  height: 82px;
+  border-radius: 70px;
+  background: rgba(255, 255, 255, .08);
+  filter: blur(1px);
+}
+
+.cloud::before, .cloud::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.cloud::before { width: 126px; height: 126px; left: 42px; bottom: 0; }
+.cloud::after { width: 92px; height: 92px; right: 42px; bottom: 2px; }
+.cloud-one { top: 18%; left: -80px; transform: scale(1.25); }
+.cloud-two { top: 48%; right: -110px; transform: scale(.85); opacity: .72; }
+.cloud-three { bottom: 5%; left: 17%; transform: scale(.62); opacity: .5; }
+
+.glow {
+  position: absolute;
+  top: -18vh;
+  right: -12vw;
+  width: 58vw;
+  height: 58vw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(136, 217, 231, .24), transparent 66%);
+}
+
+.login-page {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-height: calc(100vh - 70px);
+  place-items: center;
+  padding: 40px 20px 20px;
+}
+
+.login-shell {
+  width: min(340px, calc(100vw - 40px));
+  margin-top: -18px;
+  text-align: center;
+}
+
+.owncloud-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  filter: drop-shadow(0 2px 10px rgba(7, 29, 54, .2));
+}
+
+.logo-cloud {
+  position: relative;
+  display: inline-block;
+  width: 66px;
+  height: 32px;
+  border: 5px solid #fff;
+  border-radius: 23px;
+}
+
+.logo-cloud::before, .logo-cloud::after, .logo-cloud i, .logo-cloud b {
+  content: "";
+  position: absolute;
+  border: 5px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.logo-cloud::before { width: 29px; height: 29px; left: -13px; top: -12px; }
+.logo-cloud::after { width: 34px; height: 34px; left: 13px; top: -22px; }
+.logo-cloud i { width: 25px; height: 25px; right: -14px; top: -9px; }
+.logo-cloud b { width: 11px; height: 11px; left: 24px; top: 5px; border-width: 3px; }
+
+.logo-text {
+  font-size: 35px;
+  font-weight: 300;
+  letter-spacing: -1.7px;
+}
+
+.tagline {
+  margin: 13px 0 31px;
+  color: rgba(255, 255, 255, .78);
+  font-size: 13px;
+}
+
+.login-form {
+  border-radius: 7px;
+  box-shadow: 0 13px 34px rgba(7, 30, 55, .25);
+}
+
+.input-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 51px;
+  background: rgba(255, 255, 255, .96);
+}
+
+.first-row { border-radius: 7px 7px 0 0; }
+.second-row { border-top: 1px solid #dfe4e8; border-radius: 0 0 7px 7px; }
+
+.input-row input {
+  width: 100%;
+  height: 100%;
+  padding: 0 50px 0 48px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #34495e;
+  font-size: 15px;
+}
+
+.input-row input::placeholder { color: #8895a0; opacity: 1; }
+.input-row:focus-within { z-index: 1; box-shadow: inset 0 0 0 2px rgba(45, 148, 203, .78); }
+
+.input-icon {
+  position: absolute;
+  z-index: 2;
+  left: 18px;
+  width: 17px;
+  height: 17px;
+  opacity: .5;
+}
+
+.user-icon {
+  border: 2px solid #60788a;
+  border-radius: 50%;
+}
+
+.user-icon::after {
+  content: "";
+  position: absolute;
+  left: -5px;
+  bottom: -8px;
+  width: 23px;
+  height: 11px;
+  border: 2px solid #60788a;
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+}
+
+.lock-icon {
+  width: 16px;
+  height: 14px;
+  border-radius: 2px;
+  background: #60788a;
+}
+
+.lock-icon::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: -9px;
+  width: 7px;
+  height: 9px;
+  border: 2px solid #60788a;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.submit-button {
+  position: absolute;
+  z-index: 3;
+  right: 9px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: #2c90c3;
+  color: #fff;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 30px;
+  transition: background .15s, transform .15s;
+}
+
+.submit-button:hover { background: #237caa; transform: translateX(1px); }
+.submit-button:disabled { cursor: wait; opacity: .62; }
+
+.remember-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 17px 0 0;
+  color: rgba(255, 255, 255, .88);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.remember-row input { width: 15px; height: 15px; accent-color: #58a8d0; }
+
+.form-message {
+  min-height: 38px;
+  margin: 15px 0 0;
+  padding: 0 8px;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.45;
+  text-shadow: 0 1px 5px rgba(8, 31, 54, .28);
+}
+
+.footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 15px 20px;
+  color: rgba(255, 255, 255, .65);
+  font-size: 11px;
+}
+
+.footer nav { display: flex; gap: 14px; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 520px) {
+  .login-page { min-height: calc(100vh - 85px); }
+  .logo-text { font-size: 31px; }
+  .logo-cloud { transform: scale(.9); }
+  .footer { min-height: 85px; flex-direction: column; gap: 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+}
+
+  </style>
+  <script nonce="camouflage-preset">
+(() => {
+  "use strict";
+
+  const bootstrapRequests = [
+    "/core/css/guest.css?v=10.15",
+    "/core/js/login.js?v=10.15",
+    "/core/img/favicon.svg",
+    "/status.php",
+  ];
+
+  const probe = (path) => fetch(path, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-store",
+    redirect: "manual",
+    headers: { Accept: "application/json, text/plain, */*" },
+  }).catch(() => undefined);
+
+  document.addEventListener("DOMContentLoaded", () => {
+    bootstrapRequests.forEach((path) => { void probe(path); });
+
+    const form = document.getElementById("owncloud-login");
+    const message = document.getElementById("owncloud-message");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      message.textContent = "Checking your credentialsвЂ¦";
+
+      const body = "user=&password=&timezone=UTC&timezone_offset=0&requesttoken=decoy";
+      try {
+        await fetch("/index.php/login", {
+          method: "POST",
+          credentials: "omit",
+          cache: "no-store",
+          redirect: "manual",
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+          body,
+        });
+      } catch (_) {
+        // A production stub may intentionally close or reject this request.
+      } finally {
+        form.reset();
+        button.disabled = false;
+        message.textContent = "The server is temporarily unavailable. Please try again later.";
+      }
+    });
+  });
+})();
+
+  </script>
+</head>
+<body id="body-login">
+  <div class="cloudscape" aria-hidden="true">
+    <span class="cloud cloud-one"></span>
+    <span class="cloud cloud-two"></span>
+    <span class="cloud cloud-three"></span>
+    <span class="glow"></span>
+  </div>
+
+  <main class="login-page">
+    <section class="login-shell" aria-labelledby="owncloud-title">
+      <div class="owncloud-logo" aria-hidden="true">
+        <span class="logo-cloud"><i></i><b></b></span>
+        <span class="logo-text">ownCloud</span>
+      </div>
+      <h1 id="owncloud-title" class="visually-hidden">Sign in to ownCloud</h1>
+      <p class="tagline">A safe home for all your data</p>
+
+      <form id="owncloud-login" class="login-form" action="/index.php/login" method="post" novalidate>
+        <input type="hidden" name="requesttoken" value="decoy">
+
+        <div class="input-row first-row">
+          <span class="input-icon user-icon" aria-hidden="true"></span>
+          <label class="visually-hidden" for="owncloud-account">Username or email</label>
+          <input id="owncloud-account" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Username or email" autofocus>
+        </div>
+
+        <div class="input-row second-row">
+          <span class="input-icon lock-icon" aria-hidden="true"></span>
+          <label class="visually-hidden" for="owncloud-password">Password</label>
+          <input id="owncloud-password" type="password" autocomplete="new-password" placeholder="Password">
+          <button class="submit-button" type="submit" aria-label="Log in">&#8594;</button>
+        </div>
+
+        <label class="remember-row">
+          <input type="checkbox">
+          <span>Stay logged in</span>
+        </label>
+      </form>
+
+      <p id="owncloud-message" class="form-message" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>ownCloud&nbsp;&mdash; A safe home for all your data</span>
+    <nav aria-label="Legal links">
+      <a href="/index.php/settings/help">Help</a>
+      <a href="/index.php/settings/personal">Privacy</a>
+    </nav>
+  </footer>
+</body>
+</html>

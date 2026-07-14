@@ -39,6 +39,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("OCSERV_UI_JOURNAL_FILE: /opt/ocserv-vps/logs/vpn-events.jsonl", control_block)
         self.assertIn("OCSERV_UI_CERT_RENEW_TRIGGER: ${OCSERV_UI_CERT_RENEW_TRIGGER}", control_block)
         self.assertIn("- ./logs:/opt/ocserv-vps/logs:ro", control_block)
+        self.assertIn("- ./camouflage:/opt/ocserv-vps/camouflage:ro", control_block)
         self.assertIn("- ./config:/etc/ocserv:ro", control_block)
         self.assertIn("- /etc/letsencrypt:/etc/letsencrypt:ro", control_block)
         self.assertIn("source: ${OCSERV_UI_ACTION_DIR}", control_block)
@@ -219,6 +220,7 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("restore_previous", remote)
         self.assertIn("ensure_vpn_journal_config", remote)
         self.assertIn("render_compose_file", remote)
+        self.assertIn("- ./camouflage:/opt/ocserv-vps/camouflage:ro", remote)
         self.assertIn("OCSERV_UI_LOCAL_HOST=${UI_LOCAL_HOST}", remote)
         self.assertIn("OCSERV_UI_VPN_DOMAIN=${DOMAIN}", remote)
         self.assertIn("install_ocserv_restart_bridge", remote)
@@ -227,9 +229,13 @@ class InstallComposeContractTests(unittest.TestCase):
 
     def test_navigation_refreshes_server_backed_views(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
+        index = (repository / "ui" / "web" / "app" / "static" / "index.html").read_text(encoding="utf-8")
         app = (repository / "ui" / "web" / "app" / "static" / "app.js").read_text(encoding="utf-8")
-        for call in ("loadOverview(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)", "loadConfiguration(true)"):
+        for call in ("loadOverview(true)", "loadCamouflage(true)", "loadUsers(true)", "loadConnections(true)", "loadJournal(true)", "loadConfiguration(true)"):
             self.assertIn(call, app)
+        self.assertIn('id="overview-camouflage-mode"', index)
+        self.assertIn('href="#camouflage"', index)
+        self.assertIn("renderOverviewCamouflage(normalizeCamouflage(camouflage))", app)
 
     def test_configuration_editor_is_read_only_by_default_and_validated_before_restart(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]
@@ -523,6 +529,69 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertNotIn("camouflage", state_writer)
         self.assertIn("connectionServerURL", control)
         self.assertIn("camouflageSecretPattern", control)
+
+    def test_advanced_camouflage_is_tcp_only_and_keeps_ocserv_tls_end_to_end(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        manager = (repository / "ocserv-vps.sh").read_text(encoding="utf-8")
+        bootstrap = (repository / "scripts" / "bootstrap-vps.sh").read_text(
+            encoding="utf-8"
+        )
+        common = (repository / "scripts" / "common.sh").read_text(encoding="utf-8")
+        status = (repository / "scripts" / "status.sh").read_text(encoding="utf-8")
+        uninstaller = (repository / "scripts" / "uninstall.sh").read_text(
+            encoding="utf-8"
+        )
+
+        for contract in (
+            "OCSERV_ADVANCED_CAMOUFLAGE",
+            "OCSERV_CAMOUFLAGE_SITE_TEMPLATE",
+            "OCSERV_CAMOUFLAGE_SITE_URL",
+        ):
+            self.assertIn(contract, manager)
+        for contract in ("--advanced-camouflage", "--camouflage-site-template"):
+            self.assertIn(contract, manager)
+            self.assertIn(contract, bootstrap)
+        self.assertIn("--camouflage-site-url", bootstrap)
+        self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL", manager)
+        self.assertIn("OCSERV_BOOTSTRAP_CAMOUFLAGE_SITE_URL", bootstrap)
+        self.assertIn("Advanced Camouflage requires public VPN port 443", bootstrap)
+        self.assertNotIn("libnginx-mod-stream", bootstrap)
+        self.assertIn('render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 0', bootstrap)
+        self.assertIn("install_camouflage_site", bootstrap)
+        self.assertIn("render_advanced_camouflage_nginx", bootstrap)
+        self.assertIn("verify_advanced_camouflage_site", bootstrap)
+        self.assertIn("cover site did not negotiate HTTP/2", common)
+        self.assertIn("pull_camouflage_image", bootstrap)
+        self.assertIn("test_camouflage_image_config", bootstrap)
+        self.assertIn("container_name: ocserv-camouflage-site", common)
+        self.assertIn("./camouflage/site:/srv/camouflage:ro", common)
+        self.assertIn("./camouflage/nginx.conf:/etc/nginx/nginx.conf:ro", common)
+        self.assertIn("network_mode: host", common)
+
+        rendered = common.split("render_ocserv_config() {", 1)[1].split(
+            "create_password_user() {", 1
+        )[0]
+        self.assertIn("tcp_port=\"${OCSERV_CAMOUFLAGE_TCP_PORT}\"", rendered)
+        self.assertIn("udp_port=0", rendered)
+        self.assertIn("listen_host='127.0.0.1'", rendered)
+        self.assertIn("no-udp = true", rendered)
+        self.assertIn("listen-proxy-proto = true", rendered)
+        nginx = common.split("render_advanced_camouflage_nginx() {", 1)[1].split(
+            "verify_advanced_camouflage_site() {", 1
+        )[0]
+        self.assertIn("ssl_preread on", nginx)
+        self.assertIn("proxy_protocol on", nginx)
+        self.assertIn("http2 on", nginx)
+        self.assertIn("root ${OCSERV_CAMOUFLAGE_CONTAINER_SITE_ROOT}", nginx)
+        self.assertNotIn("load_module", nginx)
+        self.assertIn("try_files \\$uri \\$uri/ /index.html", nginx)
+        self.assertIn("$ssl_preread_alpn_protocols", nginx)
+        self.assertNotIn("proxy_ssl_", nginx)
+        self.assertNotIn("CAMOUFLAGE_DOWNLOAD_URL", nginx)
+        self.assertNotIn("proxy_pass https://127.0.0.1", nginx)
+        self.assertIn("UDP/DTLS: disabled (udp-port = 0, no listener)", status)
+        self.assertIn('"${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"', uninstaller)
+        self.assertNotIn("systemctl reload nginx", uninstaller)
 
     def test_bootstrap_prints_generated_initial_vpn_credentials(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]

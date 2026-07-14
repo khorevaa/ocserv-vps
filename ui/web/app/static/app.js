@@ -12,6 +12,8 @@
     connectionsLoaded: false,
     journalLoaded: false,
     containerLogsLoaded: false,
+    camouflageLoaded: false,
+    camouflage: null,
     configurationLoaded: false,
     configurationEditing: false,
     configurationContent: "",
@@ -129,6 +131,9 @@
         configuration_unavailable: "Управляемая конфигурация ocserv недоступна для чтения.",
         configuration_changed: "Конфигурация была изменена после загрузки. Обновите страницу и повторите правки.",
         invalid_configuration: "ocserv отклонил конфигурацию. Проверьте директивы и указанные пути к файлам.",
+        camouflage_disabled: "Скрытый режим ocserv выключен.",
+        invalid_camouflage_state: "Параметры продвинутой маскировки не согласованы с конфигурацией ocserv.",
+        invalid_camouflage_site: "Метаданные сайта маскировки повреждены или недоступны.",
         configuration_write_failed: "Не удалось безопасно сохранить конфигурацию ocserv.",
         restart_unavailable: "Конфигурация не применена: служба перезапуска ocserv недоступна.",
         rollback_failed: "Не удалось восстановить предыдущую конфигурацию ocserv. Требуется проверка VPS по SSH.",
@@ -253,6 +258,9 @@
     state.containerLogsTotal = 0;
     state.containerLogsTotalPages = 1;
     state.containerLogsCapturedAt = "";
+    state.camouflageLoaded = false;
+    state.camouflage = null;
+    hideCamouflageSecret();
     state.configurationLoaded = false;
     state.configurationEditing = false;
     state.configurationContent = "";
@@ -297,7 +305,7 @@
     setHidden(bootView, true);
     setHidden(appView, false);
     const requestedView = window.location.hash.slice(1);
-    navigateTo(["overview", "connections", "journal", "logs", "users", "configuration"].includes(requestedView) ? requestedView : "overview");
+    navigateTo(["overview", "camouflage", "connections", "journal", "logs", "users", "configuration"].includes(requestedView) ? requestedView : "overview");
   }
 
   function handleUnauthorized(error) {
@@ -322,7 +330,8 @@
   }
 
   function navigateTo(view) {
-    const nextView = ["overview", "connections", "journal", "logs", "users", "configuration"].includes(view) ? view : "overview";
+    const nextView = ["overview", "camouflage", "connections", "journal", "logs", "users", "configuration"].includes(view) ? view : "overview";
+    if (state.currentView === "camouflage" && nextView !== "camouflage") hideCamouflageSecret();
     state.currentView = nextView;
     document.querySelectorAll("[data-panel]").forEach((panel) => {
       setHidden(panel, panel.dataset.panel !== nextView);
@@ -336,11 +345,12 @@
         link.removeAttribute("aria-current");
       }
     });
-    const titles = { overview: "Состояние системы", connections: "Подключения", journal: "Журнал событий", logs: "Логи сервера", users: "Пользователи", configuration: "Конфигурация ocserv" };
+    const titles = { overview: "Состояние системы", camouflage: "Режим маскировки", connections: "Подключения", journal: "Журнал событий", logs: "Логи сервера", users: "Пользователи", configuration: "Конфигурация ocserv" };
     document.title = `${titles[nextView]} — ocserv VPN Server`;
     closeSidebar();
 
     if (nextView === "users") loadUsers(true);
+    else if (nextView === "camouflage") loadCamouflage(true);
     else if (nextView === "connections") loadConnections(true);
     else if (nextView === "journal") loadJournal(true);
     else if (nextView === "logs") loadContainerLogs(!state.containerLogsLoaded);
@@ -533,6 +543,7 @@
       setConfigurationEditing(false);
       showToast("Конфигурация сохранена. ocserv перезапускается…", "success");
       state.overviewLoaded = false;
+      state.camouflageLoaded = false;
       state.connectionsLoaded = false;
       state.usersLoaded = false;
       for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -700,9 +711,14 @@
     clearInlineError(el("overview-error"));
     setBusy(refreshButton, true);
     try {
-      const [data, ui] = await Promise.all([apiRequest("/api/v1/overview"), apiRequest("/api/v1/ui")]);
+      const [data, ui, camouflage] = await Promise.all([
+        apiRequest("/api/v1/overview"),
+        apiRequest("/api/v1/ui"),
+        apiRequest("/api/v1/camouflage"),
+      ]);
       renderOverview(data || {});
       renderUIInfo(ui || {});
+      renderOverviewCamouflage(normalizeCamouflage(camouflage));
       state.overviewLoaded = true;
     } catch (error) {
       if (!handleUnauthorized(error)) {
@@ -750,6 +766,209 @@
       if (!handleUnauthorized(error)) showToast(error.message || "Не удалось скопировать секрет доступа.", "danger");
     } finally {
       setBusy(button, false);
+    }
+  });
+
+  function normalizeCamouflage(payload) {
+    const endpoint = payload && payload.endpoint;
+    const camouflage = payload && payload.camouflage;
+    const transport = payload && payload.transport;
+    const advanced = payload && payload.advanced;
+    const modes = ["disabled", "native", "advanced"];
+    if (!payload || !modes.includes(payload.mode)
+      || !endpoint || typeof endpoint.domain !== "string"
+      || !Number.isInteger(endpoint.public_port) || endpoint.public_port < 1 || endpoint.public_port > 65535
+      || !camouflage || typeof camouflage.enabled !== "boolean" || typeof camouflage.realm !== "string"
+      || !camouflage.secret || typeof camouflage.secret.configured !== "boolean" || typeof camouflage.secret.masked !== "string"
+      || !transport || !Number.isInteger(transport.tcp_port) || transport.tcp_port < 1 || transport.tcp_port > 65535
+      || !Number.isInteger(transport.udp_port) || transport.udp_port < 0 || transport.udp_port > 65535
+      || typeof transport.listen_host !== "string" || typeof transport.no_udp !== "boolean" || typeof transport.proxy_protocol !== "boolean"
+      || !advanced || typeof advanced.enabled !== "boolean" || typeof advanced.container !== "string"
+      || !Number.isInteger(advanced.cover_port) || typeof advanced.browser_protocol !== "string"
+      || typeof advanced.vpn_protocol !== "string" || typeof advanced.site_mount !== "string"
+      || typeof advanced.preview_url !== "string") {
+      throw new Error("Сервер вернул некорректные параметры маскировки.");
+    }
+    const expectedPreview = `https://${endpoint.domain}/`;
+    if (camouflage.enabled !== (payload.mode !== "disabled")
+      || camouflage.secret.configured !== camouflage.enabled
+      || advanced.enabled !== (payload.mode === "advanced")
+      || advanced.preview_url !== (advanced.enabled ? expectedPreview : "")) {
+      throw new Error("Сервер вернул несогласованные параметры маскировки.");
+    }
+    if (advanced.enabled) {
+      if (endpoint.public_port !== 443 || transport.tcp_port !== 8443 || transport.udp_port !== 0
+        || transport.listen_host !== "127.0.0.1" || !transport.no_udp || !transport.proxy_protocol
+        || advanced.container !== "ocserv-camouflage-site" || advanced.cover_port !== 8444
+        || advanced.browser_protocol !== "HTTP/2" || advanced.vpn_protocol !== "HTTP/1.1 + CSTP"
+        || advanced.site_mount !== "/srv/camouflage:ro") {
+        throw new Error("Сервер вернул некорректную схему продвинутой маскировки.");
+      }
+    }
+    let site = null;
+    if (advanced.site !== null) {
+      if (!advanced.site || !["preset", "custom"].includes(advanced.site.source)
+        || typeof advanced.site.preset !== "string" || typeof advanced.site.name !== "string") {
+        throw new Error("Сервер вернул некорректный источник сайта маскировки.");
+      }
+      site = advanced.site;
+    }
+    return { mode: payload.mode, endpoint, camouflage, transport, advanced: { ...advanced, site } };
+  }
+
+  function statusText(value) {
+    return value ? "Включён" : "Выключен";
+  }
+
+  function setCamouflageDot(element, enabled) {
+    element.className = `status-dot-label ${enabled ? "is-good" : ""}`.trim();
+    element.querySelector("span").textContent = statusText(enabled);
+  }
+
+  function hideCamouflageSecret() {
+    const value = el("camouflage-secret-value");
+    const toggle = el("camouflage-secret-toggle");
+    const copy = el("camouflage-secret-copy");
+    if (!value || !toggle || !copy) return;
+    value.dataset.revealed = "false";
+    value.textContent = state.camouflage && state.camouflage.camouflage.secret.configured
+      ? state.camouflage.camouflage.secret.masked
+      : "—";
+    toggle.textContent = "Показать";
+    toggle.disabled = !(state.camouflage && state.camouflage.camouflage.secret.configured);
+    setHidden(copy, true);
+  }
+
+  function camouflageSiteLabel(site) {
+    if (!site) return "Не определён: метаданные источника недоступны";
+    if (site.source === "custom") return "Пользовательский архив (исходный URL не сохраняется)";
+    return `${site.name} · пресет ${site.preset}`;
+  }
+
+  function renderOverviewCamouflage(data) {
+    const labels = {
+      disabled: "Без маскировки",
+      native: "Скрытый режим ocserv",
+      advanced: "Продвинутая маскировка",
+    };
+    const link = el("overview-camouflage-mode");
+    link.textContent = labels[data.mode];
+    link.dataset.mode = data.mode;
+  }
+
+  function renderCamouflage(data) {
+    state.camouflage = data;
+    renderOverviewCamouflage(data);
+    const labels = {
+      disabled: {
+        name: "Без маскировки",
+        badge: "Обычный режим",
+        description: "ocserv принимает стандартные OpenConnect-подключения без скрытого URL и сайта-заглушки.",
+      },
+      native: {
+        name: "Скрытый режим ocserv",
+        badge: "Native Camouflage",
+        description: "ocserv проверяет секрет в URL, но отдельный Nginx-сайт маскировки не запущен.",
+      },
+      advanced: {
+        name: "Продвинутая маскировка",
+        badge: "Nginx + ocserv",
+        description: "Браузерам показывается сайт-заглушка по HTTP/2, а VPN-трафик направляется в ocserv по TCP.",
+      },
+    };
+    const current = labels[data.mode];
+    el("camouflage-mode-name").textContent = current.name;
+    el("camouflage-mode-description").textContent = current.description;
+    const badge = el("camouflage-mode-badge");
+    badge.textContent = current.badge;
+    badge.className = `status-badge ${data.mode === "disabled" ? "status-badge--neutral" : "status-badge--online"}`;
+    el("camouflage-mode-icon").classList.toggle("is-disabled", data.mode === "disabled");
+
+    setCamouflageDot(el("camouflage-native-state"), data.camouflage.enabled);
+    el("camouflage-public-endpoint").textContent = `${data.endpoint.domain}:${data.endpoint.public_port}`;
+    el("camouflage-enabled").textContent = statusText(data.camouflage.enabled);
+    el("camouflage-realm").textContent = data.camouflage.realm || "—";
+    hideCamouflageSecret();
+
+    el("camouflage-advanced-state").textContent = data.advanced.enabled ? "Включена" : "Выключена";
+    el("camouflage-ocserv-listener").textContent = `${data.transport.listen_host}:${data.transport.tcp_port}`;
+    el("camouflage-tcp-state").textContent = `Включён · tcp-port = ${data.transport.tcp_port}`;
+    el("camouflage-udp-state").textContent = data.transport.no_udp || data.transport.udp_port === 0
+      ? `Отключён · udp-port = ${data.transport.udp_port}, no-udp = ${data.transport.no_udp}`
+      : `Включён · udp-port = ${data.transport.udp_port}`;
+    el("camouflage-proxy-state").textContent = statusText(data.transport.proxy_protocol);
+
+    setHidden(el("camouflage-advanced-card"), !data.advanced.enabled);
+    setHidden(el("camouflage-preview-card"), !data.advanced.enabled);
+    setHidden(el("camouflage-preview-unavailable"), data.advanced.enabled);
+    const frame = el("camouflage-preview");
+    const link = el("camouflage-preview-link");
+    if (!data.advanced.enabled) {
+      frame.removeAttribute("src");
+      link.removeAttribute("href");
+      return;
+    }
+    el("camouflage-site-source").textContent = camouflageSiteLabel(data.advanced.site);
+    el("camouflage-container").textContent = data.advanced.container;
+    el("camouflage-site-mount").textContent = data.advanced.site_mount;
+    el("camouflage-nginx-entry").textContent = `${data.endpoint.domain}:${data.endpoint.public_port} → Nginx stream`;
+    el("camouflage-browser-route").textContent = `${data.advanced.browser_protocol} → 127.0.0.1:${data.advanced.cover_port}`;
+    el("camouflage-vpn-route").textContent = `${data.advanced.vpn_protocol} → ${data.transport.listen_host}:${data.transport.tcp_port}`;
+    frame.src = data.advanced.preview_url;
+    link.href = data.advanced.preview_url;
+  }
+
+  async function loadCamouflage(force = false) {
+    if (state.camouflageLoaded && !force) return;
+    const refresh = el("camouflage-refresh");
+    clearInlineError(el("camouflage-error"));
+    hideCamouflageSecret();
+    setBusy(refresh, true);
+    try {
+      const data = normalizeCamouflage(await apiRequest("/api/v1/camouflage"));
+      renderCamouflage(data);
+      state.camouflageLoaded = true;
+    } catch (error) {
+      state.camouflageLoaded = false;
+      if (!handleUnauthorized(error)) showInlineError(el("camouflage-error"), error.message || "Не удалось загрузить режим маскировки.");
+    } finally {
+      setBusy(refresh, false);
+    }
+  }
+
+  el("camouflage-refresh").addEventListener("click", () => loadCamouflage(true));
+
+  el("camouflage-secret-toggle").addEventListener("click", async () => {
+    const button = el("camouflage-secret-toggle");
+    if (el("camouflage-secret-value").dataset.revealed === "true") {
+      hideCamouflageSecret();
+      return;
+    }
+    setBusy(button, true);
+    try {
+      const result = await apiRequest("/api/v1/camouflage/secret", { method: "POST" });
+      const secret = result && typeof result.secret === "string" ? result.secret : "";
+      if (!/^[A-Za-z0-9._~-]{16,128}$/.test(secret)) throw new Error("Сервер не вернул секрет скрытого режима.");
+      el("camouflage-secret-value").textContent = secret;
+      el("camouflage-secret-value").dataset.revealed = "true";
+      button.textContent = "Скрыть";
+      setHidden(el("camouflage-secret-copy"), false);
+    } catch (error) {
+      if (!handleUnauthorized(error)) showToast(error.message || "Не удалось раскрыть секрет скрытого режима.", "danger");
+    } finally {
+      button.disabled = !(state.camouflage && state.camouflage.camouflage.secret.configured);
+      button.setAttribute("aria-busy", "false");
+    }
+  });
+
+  el("camouflage-secret-copy").addEventListener("click", async () => {
+    const value = el("camouflage-secret-value");
+    if (value.dataset.revealed !== "true") return;
+    try {
+      await copyText(value.textContent);
+      showToast("Секрет скрытого режима скопирован", "success");
+    } catch (_error) {
+      showToast("Не удалось скопировать секрет скрытого режима.", "danger");
     }
   });
 
@@ -1297,15 +1516,21 @@
       closeModal();
       showToast("ocserv перезапускается…");
       state.overviewLoaded = false;
+      state.camouflageLoaded = false;
       state.connectionsLoaded = false;
       state.usersLoaded = false;
       for (let attempt = 0; attempt < 20; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
         try {
-          const [overview, ui] = await Promise.all([apiRequest("/api/v1/overview"), apiRequest("/api/v1/ui")]);
+          const [overview, ui, camouflage] = await Promise.all([
+            apiRequest("/api/v1/overview"),
+            apiRequest("/api/v1/ui"),
+            apiRequest("/api/v1/camouflage"),
+          ]);
           if (isServiceOnline(overview && overview.service && overview.service.status)) {
             renderOverview(overview);
             renderUIInfo(ui || {});
+            renderOverviewCamouflage(normalizeCamouflage(camouflage));
             state.overviewLoaded = true;
             showToast("ocserv снова работает", "success");
             return;

@@ -68,6 +68,37 @@ OCSERV_CAMOUFLAGE_REALM='Test Environment' \
 sudo -E ocserv-vps install
 ```
 
+#### Advanced website camouflage
+
+After native Camouflage is enabled, the installer can enable an advanced TCP-only mode and offer a cover-site choice. A separate `ocserv-camouflage-site` Nginx container owns public TCP/443 through host networking: HTTP/2 browsers receive the selected website, while HTTP/1.1 OpenConnect/AnyConnect traffic is passed to the `ocserv-vps` container on `127.0.0.1:8443`. Nginx does not terminate the ocserv TLS connection, the client address is preserved with PROXY protocol, and ocserv still validates the URL secret.
+
+Three built-in presets are available: `synology`, `owncloud`, and `workspace`. Their `camouflage.json` contracts generate exact local Nginx routes for entry pages, characteristic bootstrap requests, and fixed no-credential form responses. The fourth choice, `custom`, downloads a user-supplied cover site from `OCSERV_CAMOUFLAGE_SITE_URL`. The URL is used once during installation to download a file; it is not a reverse-proxy origin. ZIP, TAR/TAR.GZ, and standalone HTML downloads are supported and must produce a root `index.html`.
+
+```bash
+OCSERV_CAMOUFLAGE=1 \
+OCSERV_ADVANCED_CAMOUFLAGE=1 \
+OCSERV_CAMOUFLAGE_SITE_TEMPLATE=synology \
+sudo -E ocserv-vps install
+```
+
+The generated Nginx configuration and selected site are bind-mounted read-only into `ocserv-camouflage-site` when Compose starts it. The official Nginx image is resolved to an immutable digest during installation and stored in the protected stack environment.
+
+For the most advanced custom choice:
+
+```bash
+OCSERV_CAMOUFLAGE=1 \
+OCSERV_ADVANCED_CAMOUFLAGE=1 \
+OCSERV_CAMOUFLAGE_SITE_TEMPLATE=custom \
+OCSERV_CAMOUFLAGE_SITE_URL='https://downloads.example/vpn-cover.zip' \
+sudo -E ocserv-vps install
+```
+
+The custom URL must return the file directly over HTTPS without a redirect, contain no credentials or fragment, and resolve only to public IPv4 addresses different from the VPN endpoint. Both the download and unpacked website are limited to 10 MiB and 1,000 entries; links, special files, and unsafe archive paths are rejected. The URL is not persisted in Nginx or state. Only deploy content you are authorized to use.
+
+UDP/DTLS is intentionally disabled completely in this mode: UDP/443 is not opened in the firewall and ocserv receives `udp-port = 0` plus `no-udp = true`, so it does not create even a local UDP listener. Public port `443` is required.
+
+Browser routing relies on HTTP/2 ALPN. An HTTP/1.1-only browser or a purpose-built probe reaches ocserv's native Camouflage response (404/401), so this mode improves the appearance of ordinary browsing but does not claim to be indistinguishable under active analysis.
+
 Pass a tag to install a specific manager release:
 
 ```bash

@@ -406,6 +406,7 @@ install -m 0644 "${OCSERV_STATE_FILE}" "${UI_PUBLIC_DIR}/state"
 install -d -m 0700 -o 10001 -g 10001 "${UI_DATA_DIR}"
 install -d -m 0750 -o root -g 10001 "${UI_SECRETS_DIR}"
 install -d -m 0750 "${UI_LOCK_DIR}"
+install -d -m 0750 "${OCSERV_CAMOUFLAGE_ROOT}"
 UI_TMPFILES_TEMP="$(mktemp /etc/tmpfiles.d/.ocserv-vps-ui.conf.XXXXXX)"
 printf 'd %s 0700 10001 10001 -\n' "${UI_WEB_RUN_DIR}" > "${UI_TMPFILES_TEMP}"
 chmod 0644 "${UI_TMPFILES_TEMP}"
@@ -490,6 +491,9 @@ services:
       - ./locks:/opt/ocserv-vps/locks:rw
       - ./ui-public:/opt/ocserv-vps/ui-public:ro
       - ./logs:/opt/ocserv-vps/logs:ro
+      # Preset/source metadata is required only for the read-only Camouflage
+      # status view. The website remains isolated from the networkless UI.
+      - ./camouflage:/opt/ocserv-vps/camouflage:ro
       - type: bind
         source: ${OCSERV_UI_CONTAINER_LOG_DIR}
         target: ${OCSERV_UI_CONTAINER_LOG_DIR}

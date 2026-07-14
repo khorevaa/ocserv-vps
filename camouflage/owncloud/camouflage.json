@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "owncloud",
+  "name": "ownCloud",
+  "realm": "ownCloud",
+  "document": "index.html",
+  "entry_paths": ["/", "/index.php/login"],
+  "requests_on_open": [
+    {
+      "method": "GET",
+      "target": "/core/css/guest.css?v=10.15",
+      "response": {"status": 204, "content_type": "text/css; charset=utf-8", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/core/js/login.js?v=10.15",
+      "response": {"status": 204, "content_type": "text/javascript; charset=utf-8", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/core/img/favicon.svg",
+      "response": {"status": 204, "content_type": "image/svg+xml", "body": ""}
+    },
+    {
+      "method": "GET",
+      "target": "/status.php",
+      "response": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"installed\":true,\"maintenance\":false,\"needsDbUpgrade\":false,\"version\":\"10.15.3.3\",\"versionstring\":\"10.15.3\",\"edition\":\"Community\",\"productname\":\"ownCloud\",\"extendedSupport\":false}"
+      }
+    }
+  ],
+  "form_request": {
+    "method": "POST",
+    "target": "/index.php/login",
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "fixed_body": "user=&password=&timezone=UTC&timezone_offset=0&requesttoken=decoy",
+    "response": {
+      "status": 503,
+      "content_type": "application/json; charset=utf-8",
+      "body": "{\"error\":\"temporarily_unavailable\"}"
+    }
+  }
+}

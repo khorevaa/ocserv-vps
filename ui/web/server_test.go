@@ -74,6 +74,19 @@ func startFakeControl(t *testing.T, path string) {
 				switch action {
 				case "overview":
 					result = map[string]any{"service": map[string]any{"status": "running", "active_sessions": 1, "uptime_seconds": 90}, "server": map[string]any{"version": "1.5.0", "image": "ghcr.io/khorevaa/ocserv-vps-server:1.5.0", "domain": "vpn.test", "vpn_network": "10.66.0.0/24", "vpn_port": 443, "openconnect_checked_at": "2026-07-12T10:00:00Z", "updated_at": "2026-07-12T10:00:00Z"}, "certificate": map[string]any{"expires_at": "2026-10-10T00:00:00Z", "days_remaining": 90, "issuer": "Let's Encrypt (R10)", "valid": true}, "users_total": 1}
+				case "camouflage_info":
+					result = map[string]any{
+						"mode": "advanced", "domain": "vpn.test", "public_port": 443,
+						"camouflage_enabled": true, "secret_configured": true, "realm": "Test Environment",
+						"tcp_port": 8443, "udp_port": 0, "listen_host": "127.0.0.1", "no_udp": true, "proxy_protocol": true,
+						"advanced": map[string]any{
+							"enabled": true, "container": "ocserv-camouflage-site", "cover_port": 8444,
+							"browser_protocol": "HTTP/2", "vpn_protocol": "HTTP/1.1 + CSTP", "site_mount": "/srv/camouflage:ro",
+							"site": map[string]any{"source": "preset", "preset": "owncloud", "name": "ownCloud"},
+						},
+					}
+				case "camouflage_secret":
+					result = map[string]any{"secret": "camouflage-secret-2026"}
 				case "list_users":
 					result = map[string]any{"users": []any{map[string]any{"username": "vpn_user", "active_sessions": 1}}, "total": 1}
 				case "list_connections":
@@ -213,7 +226,7 @@ func TestSecretOnlyFlowAndEmbeddedUI(t *testing.T) {
 			t.Fatalf("legacy UI artifact remains: %s", forbidden)
 		}
 	}
-	for _, required := range []string{"Состояние системы", "Подключения", "Журнал событий", "Пользователи", "Тема оформления: как в системе, светлая", "Секрет доступа", "Последняя проверка", `role="switch"`, `aria-checked="false"`, `id="icon-sun"`, `id="icon-moon"`} {
+	for _, required := range []string{"Состояние системы", "Режим маскировки", `id="overview-camouflage-mode"`, `href="#camouflage"`, "Превью сайта маскировки", "Секрет скрытого режима", "Подключения", "Журнал событий", "Пользователи", "Тема оформления: как в системе, светлая", "Секрет доступа", "Последняя проверка", `role="switch"`, `aria-checked="false"`, `id="icon-sun"`, `id="icon-moon"`} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("missing UI label %s", required)
 		}
@@ -251,6 +264,37 @@ func TestSecretOnlyFlowAndEmbeddedUI(t *testing.T) {
 		if strings.Contains(string(stateData), forbidden) {
 			t.Fatalf("secret leaked to JSON state")
 		}
+	}
+}
+
+func TestCamouflageInfoMasksSecretAndRevealRequiresCSRF(t *testing.T) {
+	app, _ := testApplication(t, strings.Repeat("A", 64))
+	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+strings.Repeat("A", 64)+`"}`, nil, "")
+	cookie := access.Result().Cookies()[0]
+	csrf, _ := decodeBody(t, access)["csrf_token"].(string)
+
+	response := perform(app, "GET", "/api/v1/camouflage", "", cookie, "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"mode":"advanced"`) ||
+		!strings.Contains(response.Body.String(), `"preset":"owncloud"`) || !strings.Contains(response.Body.String(), `"preview_url":"https://vpn.test/"`) ||
+		strings.Contains(response.Body.String(), "camouflage-secret-2026") || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Camouflage info=%d %s", response.Code, response.Body.String())
+	}
+	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-src https://vpn.test") || !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("Camouflage preview CSP is missing or unsafe: %q", csp)
+	}
+	if denied := perform(app, "POST", "/api/v1/camouflage/secret", `{}`, cookie, ""); denied.Code != http.StatusForbidden {
+		t.Fatalf("secret reveal without CSRF=%d", denied.Code)
+	}
+	revealed := perform(app, "POST", "/api/v1/camouflage/secret", `{}`, cookie, csrf)
+	if revealed.Code != http.StatusOK || !strings.Contains(revealed.Body.String(), "camouflage-secret-2026") || revealed.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("secret reveal=%d %s", revealed.Code, revealed.Body.String())
+	}
+	stateData, err := os.ReadFile(app.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stateData), "camouflage-secret-2026") {
+		t.Fatal("Camouflage secret leaked to persistent UI state")
 	}
 }
 

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; style-src 'nonce-camouflage-preset'; script-src 'nonce-camouflage-preset'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'">
+  <title>DiskStation&nbsp;- Synology</title>
+  <link rel="icon" href="/webman/resources/images/favicon.svg">
+  <style nonce="camouflage-preset">
+:root {
+  color-scheme: light;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #293341;
+  background: #7bb7d2;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; }
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: linear-gradient(160deg, #b9d9e3 0%, #83bdd4 38%, #4b7f9d 100%);
+}
+
+button, input { font: inherit; }
+
+.wallpaper, .wallpaper::before, .wallpaper::after {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wallpaper {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 74% 14%, rgba(255, 255, 255, .85) 0 2%, transparent 15%),
+    linear-gradient(145deg, rgba(255, 255, 255, .42), transparent 48%);
+}
+
+.wallpaper::before {
+  content: "";
+  inset: 52% -12% -22%;
+  transform: rotate(-4deg);
+  border-radius: 50% 50% 0 0;
+  background: linear-gradient(165deg, rgba(41, 91, 118, .82), rgba(18, 52, 71, .94));
+  box-shadow: 0 -22px 60px rgba(247, 252, 255, .22);
+}
+
+.wallpaper::after {
+  content: "";
+  inset: 66% -15% -25% 20%;
+  transform: rotate(6deg);
+  border-radius: 55% 45% 0 0;
+  background: linear-gradient(145deg, rgba(106, 145, 156, .88), rgba(24, 61, 75, .96));
+}
+
+.ridge {
+  position: absolute;
+  display: block;
+  width: 52vw;
+  height: 44vh;
+  border-radius: 50% 55% 0 0;
+  background: linear-gradient(155deg, rgba(118, 161, 175, .72), rgba(37, 85, 105, .82));
+  filter: blur(.2px);
+}
+
+.ridge-one { left: -16vw; bottom: 4vh; transform: rotate(12deg); }
+.ridge-two { right: -20vw; bottom: 10vh; transform: rotate(-13deg); opacity: .68; }
+
+.mist {
+  position: absolute;
+  inset: 40% -10% auto;
+  height: 18vh;
+  background: linear-gradient(to bottom, transparent, rgba(236, 248, 250, .35), transparent);
+  filter: blur(14px);
+}
+
+.brand {
+  position: fixed;
+  z-index: 2;
+  top: 30px;
+  left: 38px;
+  color: #fff;
+  text-shadow: 0 1px 12px rgba(20, 48, 63, .28);
+}
+
+.brand-mark {
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -.8px;
+}
+
+.login-shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 68px 20px 58px;
+}
+
+.login-card {
+  width: min(378px, calc(100vw - 38px));
+  min-height: 480px;
+  padding: 42px 46px 36px;
+  border: 1px solid rgba(255, 255, 255, .68);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .93);
+  box-shadow: 0 20px 55px rgba(25, 62, 82, .25), 0 2px 8px rgba(24, 54, 70, .12);
+  text-align: center;
+  backdrop-filter: blur(14px);
+}
+
+.device-icon {
+  position: relative;
+  width: 62px;
+  height: 68px;
+  margin: 0 auto 16px;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #f7f9fb, #cfd7de);
+  box-shadow: inset 0 0 0 1px rgba(80, 100, 115, .24), 0 6px 12px rgba(50, 70, 82, .13);
+}
+
+.device-face {
+  position: absolute;
+  inset: 7px 7px 11px;
+  border-radius: 4px;
+  background: linear-gradient(160deg, #5b6670, #252c32);
+}
+
+.device-slot {
+  position: absolute;
+  left: 15px;
+  width: 31px;
+  height: 3px;
+  border-radius: 2px;
+  background: #9aa5ae;
+}
+
+.slot-one { top: 21px; }
+.slot-two { top: 34px; }
+
+.device-light {
+  position: absolute;
+  z-index: 1;
+  right: 12px;
+  bottom: 16px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #68c264;
+  box-shadow: 0 0 5px rgba(104, 194, 100, .75);
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: #7f8a95;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  color: #2c3540;
+  font-size: 28px;
+  font-weight: 560;
+  letter-spacing: -.5px;
+}
+
+.welcome {
+  margin: 9px 0 28px;
+  color: #7b8691;
+  font-size: 14px;
+}
+
+.login-form { text-align: left; }
+
+.form-step { position: relative; }
+.form-step[hidden] { display: none; }
+
+label:not(.check-row) {
+  display: block;
+  margin-bottom: 7px;
+  color: #596573;
+  font-size: 13px;
+}
+
+input[type="text"], input[type="password"] {
+  width: 100%;
+  height: 43px;
+  padding: 0 12px;
+  border: 1px solid #cbd2d8;
+  border-radius: 4px;
+  outline: none;
+  background: #fff;
+  color: #303944;
+  transition: border-color .16s, box-shadow .16s;
+}
+
+input:focus {
+  border-color: #1890d8;
+  box-shadow: 0 0 0 2px rgba(24, 144, 216, .13);
+}
+
+.primary-button {
+  width: 100%;
+  height: 43px;
+  margin-top: 15px;
+  border: 0;
+  border-radius: 4px;
+  background: linear-gradient(#25a5ec, #148cd0);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .24), 0 1px 2px rgba(24, 85, 120, .22);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 550;
+}
+
+.primary-button:hover { background: linear-gradient(#30aff5, #1594dc); }
+.primary-button:disabled { cursor: wait; opacity: .66; }
+
+.back-button {
+  position: absolute;
+  top: -41px;
+  left: -31px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #73808c;
+  cursor: pointer;
+  font-size: 19px;
+}
+
+.back-button:hover { background: #eef2f5; }
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 13px;
+  color: #66727e;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.check-row input { accent-color: #168fd1; }
+
+.form-message {
+  min-height: 34px;
+  margin: 17px 0 0;
+  color: #b54f4f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.footer {
+  position: fixed;
+  z-index: 2;
+  right: 24px;
+  bottom: 18px;
+  color: rgba(255, 255, 255, .82);
+  font-size: 11px;
+  text-shadow: 0 1px 6px rgba(24, 52, 66, .32);
+}
+
+@media (max-width: 560px) {
+  .brand { top: 19px; left: 22px; }
+  .brand-mark { font-size: 23px; }
+  .login-card { min-height: 455px; padding: 34px 32px 28px; }
+  .footer { right: 16px; bottom: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}
+
+  </style>
+  <script nonce="camouflage-preset">
+(() => {
+  "use strict";
+
+  const bootstrapRequests = [
+    "/webman/resources/css/desktop.css?v=7.2",
+    "/webman/resources/js/login.js?v=7.2",
+    "/webman/resources/images/favicon.svg",
+    "/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=SYNO.API.Auth%2CSYNO.Core.System",
+    "/webapi/entry.cgi?api=SYNO.Core.System&version=1&method=info",
+  ];
+
+  const probe = (path) => fetch(path, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-store",
+    redirect: "manual",
+    headers: { Accept: "application/json, text/plain, */*" },
+  }).catch(() => undefined);
+
+  document.addEventListener("DOMContentLoaded", () => {
+    bootstrapRequests.forEach((path) => { void probe(path); });
+
+    const form = document.getElementById("synology-login");
+    const accountStep = document.getElementById("account-step");
+    const passwordStep = document.getElementById("password-step");
+    const next = document.getElementById("synology-next");
+    const back = document.getElementById("synology-back");
+    const message = document.getElementById("synology-message");
+
+    next.addEventListener("click", () => {
+      accountStep.hidden = true;
+      passwordStep.hidden = false;
+      document.getElementById("dsm-password").focus();
+    });
+
+    back.addEventListener("click", () => {
+      passwordStep.hidden = true;
+      accountStep.hidden = false;
+      message.textContent = "";
+      document.getElementById("dsm-account").focus();
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      message.textContent = "Signing inвЂ¦";
+
+      const body = "api=SYNO.API.Auth&version=7&method=login&account=&passwd=&session=FileStation&format=sid";
+      try {
+        await fetch("/webapi/entry.cgi", {
+          method: "POST",
+          credentials: "omit",
+          cache: "no-store",
+          redirect: "manual",
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+          body,
+        });
+      } catch (_) {
+        // A production stub may intentionally close or reject this request.
+      } finally {
+        form.reset();
+        button.disabled = false;
+        message.textContent = "The system is getting ready. Please try again later.";
+      }
+    });
+  });
+})();
+
+  </script>
+</head>
+<body>
+  <div class="wallpaper" aria-hidden="true">
+    <span class="ridge ridge-one"></span>
+    <span class="ridge ridge-two"></span>
+    <span class="mist"></span>
+  </div>
+
+  <header class="brand" aria-label="Synology">
+    <span class="brand-mark">Synology</span>
+  </header>
+
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="dsm-title">
+      <div class="device-icon" aria-hidden="true">
+        <span class="device-face"></span>
+        <span class="device-light"></span>
+        <span class="device-slot slot-one"></span>
+        <span class="device-slot slot-two"></span>
+      </div>
+      <p class="eyebrow">Synology NAS</p>
+      <h1 id="dsm-title">DiskStation</h1>
+      <p class="welcome">Sign in to continue to DSM</p>
+
+      <form id="synology-login" class="login-form" action="/webapi/entry.cgi" method="post" novalidate>
+        <div id="account-step" class="form-step">
+          <label for="dsm-account">Account</label>
+          <input id="dsm-account" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Account">
+          <button id="synology-next" class="primary-button" type="button">Next</button>
+        </div>
+
+        <div id="password-step" class="form-step" hidden>
+          <button id="synology-back" class="back-button" type="button" aria-label="Back to account">&#8592;</button>
+          <label for="dsm-password">Password</label>
+          <input id="dsm-password" type="password" autocomplete="new-password" placeholder="Password">
+          <label class="check-row">
+            <input type="checkbox" tabindex="0">
+            <span>Stay signed in</span>
+          </label>
+          <button class="primary-button" type="submit">Sign In</button>
+        </div>
+      </form>
+
+      <p id="synology-message" class="form-message" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <footer class="footer">DSM 7.2 &nbsp;&middot;&nbsp; Synology Inc.</footer>
+</body>
+</html>
