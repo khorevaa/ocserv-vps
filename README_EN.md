@@ -44,10 +44,15 @@ curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.s
   OCSERV_DOMAIN=vpn.example.com \
   OCSERV_ACME_EMAIL=admin@example.com \
   OCSERV_VPN_USERNAME=vpnuser \
+  OCSERV_CAMOUFLAGE=1 \
+  OCSERV_CAMOUFLAGE_REALM='Test Environment' \
+  OCSERV_ADVANCED_CAMOUFLAGE=0 \
   OCSERV_APPROVE_FIREWALL=1 \
   OCSERV_APPROVE_RESTART=1 \
   bash
 ```
+
+This example installs native ocserv Camouflage. To install without Camouflage, set `OCSERV_CAMOUFLAGE=0` and omit the other Camouflage variables. Use the example below for advanced mode.
 
 When `OCSERV_DOMAIN` is not set and stdin is non-interactive, only the manager is installed. Continue setup with:
 
@@ -60,6 +65,15 @@ sudo ocserv-vps install
 Camouflage can be enabled during interactive installation. The installer asks for the HTTP realm (default `Test Environment`) shown by ocserv to unauthorized requests, while VPN clients use a URL such as `https://vpn.example.com:443/?secret`. The URL is shown only with the sensitive VPN credentials and the secret remains in the protected server configuration.
 
 For unattended installation, set `OCSERV_CAMOUFLAGE=1`. `OCSERV_CAMOUFLAGE_SECRET` is optional; when omitted, the installer generates a random 32-character secret. `OCSERV_CAMOUFLAGE_REALM` defaults to `Test Environment`. Explicit secrets must contain 16–128 URL-safe letters, digits, `.`, `_`, `~`, or `-`.
+
+| `install.sh` variable | Purpose |
+| --- | --- |
+| `OCSERV_CAMOUFLAGE=0\|1` | Disable Camouflage or enable native Camouflage |
+| `OCSERV_CAMOUFLAGE_SECRET` | Optional secret; generated automatically when omitted |
+| `OCSERV_CAMOUFLAGE_REALM` | Native/custom realm; built-in presets take it from `camouflage.json` |
+| `OCSERV_ADVANCED_CAMOUFLAGE=0\|1` | Enable advanced TCP-only mode; requires `OCSERV_CAMOUFLAGE=1` |
+| `OCSERV_CAMOUFLAGE_SITE_TEMPLATE` | `synology`, `owncloud`, `workspace`, or `custom` preset |
+| `OCSERV_CAMOUFLAGE_SITE_URL` | Direct HTTPS cover-site download; only for the `custom` preset |
 
 ```bash
 OCSERV_CAMOUFLAGE=1 \
@@ -102,7 +116,7 @@ Browser routing relies on HTTP/2 ALPN. An HTTP/1.1-only browser or a purpose-bui
 Pass a tag to install a specific manager release:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.8
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.14
 ```
 
 ## Management
