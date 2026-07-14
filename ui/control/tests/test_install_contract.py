@@ -85,14 +85,17 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("OCSERV_UI_LOCAL_HOST=${UI_LOCAL_HOST}", installer)
         self.assertIn("OCSERV_UI_LOCAL_PORT=${UI_PORT}", installer)
         self.assertIn("OCSERV_UI_VPN_DOMAIN=${DOMAIN}", installer)
+        self.assertIn("OCSERV_UI_PUBLIC_IP=${PUBLIC_IP}", installer)
+        self.assertIn('PUBLIC_IP="$(resolve_external_ipv4 "${DOMAIN}")"', installer)
         self.assertIn('OCSERV_UI_VPN_DOMAIN: "${DOMAIN}"', web_block)
+        self.assertIn('OCSERV_UI_PUBLIC_IP: "${PUBLIC_IP}"', web_block)
         self.assertIn('OCSERV_UI_SSH_PORT: "${SSH_PORT}"', web_block)
         self.assertEqual(
             installer.count("url=http://${UI_LOCAL_HOST}:${UI_PORT}"), 1
         )
         self.assertIn(
             "tunnel_template=ssh -N -L "
-            "127.0.0.1:${UI_PORT}:${UI_WEB_SOCKET} root@<vps-host>",
+            "127.0.0.1:${UI_PORT}:${UI_WEB_SOCKET} root@${PUBLIC_IP}",
             installer,
         )
         self.assertNotIn("127.0.0.1:8080", installer)
@@ -235,6 +238,8 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("- ./camouflage:/opt/ocserv-vps/camouflage:ro", remote)
         self.assertIn("OCSERV_UI_LOCAL_HOST=${UI_LOCAL_HOST}", remote)
         self.assertIn("OCSERV_UI_VPN_DOMAIN=${DOMAIN}", remote)
+        self.assertIn("OCSERV_UI_PUBLIC_IP=${PUBLIC_IP}", remote)
+        self.assertIn('PUBLIC_IP="$(resolve_external_ipv4 "${DOMAIN}")"', remote)
         self.assertIn("install_ocserv_restart_bridge", remote)
         self.assertIn("print_ui_access_info_if_installed", remote)
         self.assertNotIn("docker.sock", remote)
@@ -471,11 +476,26 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn("chmod 0700", common)
         self.assertIn("Access secret:", common)
         self.assertIn("ssh -p %s -N -T -L localhost:%s:%s root@%s", common)
+        self.assertIn('public_ip="$(read_unique_value "${ui_env}" OCSERV_UI_PUBLIC_IP)"', common)
+        self.assertIn('"${ssh_port}" "${local_port}" "${remote_socket}" "${public_ip}"', common)
+        self.assertIn("resolve_external_ipv4()", common)
         self.assertIn("OCSERV_UI_SSH_PORT=${SSH_PORT}", installer)
+        self.assertIn("OCSERV_UI_PUBLIC_IP=${PUBLIC_IP}", installer)
         self.assertIn("render_ui_access_info_script", installer)
         self.assertIn("print_ui_access_info_if_installed", common)
         self.assertIn("print_ui_access_info_if_installed", installer)
         self.assertIn('rm -f "${OCSERV_UI_ACCESS_INFO_SCRIPT}"', installer)
+
+    def test_ui_status_and_secret_rotation_use_external_ipv4(self) -> None:
+        repository = pathlib.Path(__file__).resolve().parents[3]
+        status = (repository / "scripts" / "ui-status.sh").read_text(encoding="utf-8")
+        rotation = (repository / "scripts" / "rotate-ui-access.sh").read_text(encoding="utf-8")
+        for script in (status, rotation):
+            self.assertIn("OCSERV_UI_PUBLIC_IP", script)
+            self.assertIn('PUBLIC_IP="$(resolve_external_ipv4 "${DOMAIN}")"', script)
+            self.assertIn('validate_global_ipv4 "${PUBLIC_IP}"', script)
+        self.assertIn('"${OCSERV_UI_WEB_SOCKET}" "${PUBLIC_IP}"', status)
+        self.assertIn('root@${PUBLIC_IP}', rotation)
 
     def test_purge_uninstall_removes_root_only_credential_handoffs(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]

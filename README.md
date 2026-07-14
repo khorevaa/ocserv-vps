@@ -118,7 +118,7 @@ Custom URL должен возвращать файл напрямую по HTTP
 Конкретную версию менеджера можно указать аргументом:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.14
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.15
 ```
 
 ## Управление
@@ -197,7 +197,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/in
 sudo ocserv-vps ui-access
 ```
 
-Команда покажет текущий секрет и готовую команду SSH-туннеля к Unix-сокету `/run/ocserv-ui-web/web.sock`. Секрет обменивается на серверную сессию и не передаётся в URL.
+Команда покажет текущий секрет и готовую команду SSH-туннеля к Unix-сокету `/run/ocserv-ui-web/web.sock`. SSH target указывается внешним IPv4-адресом VPS, полученным из A-записи VPN-домена при установке или обновлении UI. Секрет обменивается на серверную сессию и не передаётся в URL.
 
 ## Контейнерные образы
 

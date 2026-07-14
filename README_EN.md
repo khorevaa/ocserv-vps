@@ -118,7 +118,7 @@ Browser routing relies on HTTP/2 ALPN. An HTTP/1.1-only browser or a purpose-bui
 Pass a tag to install a specific manager release:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.14
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.15
 ```
 
 ## Management
@@ -197,7 +197,7 @@ The panel does not expose a TCP port on the VPS. To connect, run:
 sudo ocserv-vps ui-access
 ```
 
-The command prints the current secret and a ready-to-use SSH tunnel command for `/run/ocserv-ui-web/web.sock`. The secret is exchanged for a server-side session and is never included in the URL.
+The command prints the current secret and a ready-to-use SSH tunnel command for `/run/ocserv-ui-web/web.sock`. Its SSH target is the VPS external IPv4 address resolved from the VPN domain A record during UI installation or upgrade. The secret is exchanged for a server-side session and is never included in the URL.
 
 ## Container images
 

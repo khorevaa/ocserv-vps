@@ -325,7 +325,7 @@ func (a *application) uiInfo(writer http.ResponseWriter) {
 	sshCommand := any(nil)
 	forward := fmt.Sprintf("localhost:%d:%s", a.config.UILocalPort, a.config.WebSocket)
 	if sshForwardPattern.MatchString(forward) {
-		sshCommand = fmt.Sprintf("ssh -p %d -N -T -L %s root@%s", a.config.SSHPort, forward, a.config.VPNDomain)
+		sshCommand = fmt.Sprintf("ssh -p %d -N -T -L %s root@%s", a.config.SSHPort, forward, a.config.PublicIP)
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"version": safeVersion, "image": image, "ssh_command": sshCommand,
