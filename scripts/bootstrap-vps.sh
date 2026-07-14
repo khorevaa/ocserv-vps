@@ -269,6 +269,21 @@ else
   render_network_assets "${VPN_NETWORK}" "${VPN_PORT}" "${SSH_PORT}" "${PUBLIC_INTERFACE}" 1
 fi
 
+request_certificate() {
+  local attempt delay
+  for attempt in 1 2 3; do
+    if certbot certonly "$@"; then
+      return 0
+    fi
+    if [[ "${attempt}" == 3 ]]; then
+      die 'Certificate request failed after 3 attempts.'
+    fi
+    delay=$((attempt * 5))
+    warn "Certificate request attempt ${attempt}/3 failed; retrying in ${delay}s."
+    sleep "${delay}"
+  done
+}
+
 if [[ "${PREPARE_NGINX}" == "1" ]]; then
   apt-get install -y --no-install-recommends nginx
   install -d -m 0755 "${OCSERV_ACME_WEBROOT}/.well-known/acme-challenge"
@@ -292,11 +307,11 @@ EOF
   nginx -t
   systemctl enable --now nginx
   systemctl reload nginx
-  certbot certonly --webroot -w "${OCSERV_ACME_WEBROOT}" \
+  request_certificate --webroot -w "${OCSERV_ACME_WEBROOT}" \
     --non-interactive --agree-tos --keep-until-expiring \
     --email "${ACME_EMAIL}" -d "${DOMAIN}"
 else
-  certbot certonly --standalone \
+  request_certificate --standalone \
     --non-interactive --agree-tos --keep-until-expiring \
     --email "${ACME_EMAIL}" -d "${DOMAIN}"
 fi
