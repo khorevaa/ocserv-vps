@@ -516,6 +516,28 @@ if network.version != 4 or network.prefixlen < 8:
 PY
 }
 
+validate_global_ipv4() {
+  require_command python3
+  python3 - "$1" <<'PY'
+import ipaddress
+import sys
+
+address = ipaddress.ip_address(sys.argv[1])
+if address.version != 4 or not address.is_global:
+    raise SystemExit(1)
+PY
+}
+
+resolve_external_ipv4() {
+  local domain="$1" address
+  validate_domain "${domain}"
+  address="$(getent ahostsv4 "${domain}" | awk '$2 == "STREAM" {print $1; exit}')"
+  [[ -n "${address}" ]] || die "Cannot resolve ${domain} to an external IPv4 address."
+  validate_global_ipv4 "${address}" || \
+    die "The resolved address for ${domain} is not a public IPv4 address: ${address}"
+  printf '%s\n' "${address}"
+}
+
 validate_interface() {
   [[ "$1" =~ ^[A-Za-z0-9_.:-]{1,32}$ ]] || die "Unsafe interface name: $1"
 }
@@ -1725,11 +1747,10 @@ umask 077
 
 stack_root=/opt/ocserv-vps
 ui_env="${stack_root}/ui.env"
-state_file="${stack_root}/state"
 secret_file="${stack_root}/ui-secrets/access-secret"
 remote_socket=/run/ocserv-ui-web/web.sock
 
-for path in "${ui_env}" "${state_file}" "${secret_file}"; do
+for path in "${ui_env}" "${secret_file}"; do
   [[ -f "${path}" && ! -L "${path}" ]] || {
     printf 'Required managed file is missing or unsafe: %s\n' "${path}" >&2
     exit 1
@@ -1758,7 +1779,7 @@ ssh_port="$(awk -F= '$1 == "OCSERV_UI_SSH_PORT" {print substr($0, index($0, "=")
   exit 1
 }
 ssh_port="${ssh_port:-22}"
-domain="$(read_unique_value "${state_file}" domain)"
+public_ip="$(read_unique_value "${ui_env}" OCSERV_UI_PUBLIC_IP)"
 secret="$(<"${secret_file}")"
 
 [[ "${browser_host}" =~ ^ocserv-[0-9a-f]{32}\.localhost$ ]] || {
@@ -1769,8 +1790,16 @@ for value in "${local_port}" "${ssh_port}"; do
     printf '%s\n' 'A managed port is invalid.' >&2; exit 1;
   }
 done
-[[ "${domain}" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$ ]] || {
-  printf '%s\n' 'The managed VPN domain is unsafe.' >&2; exit 1;
+python3 - "${public_ip}" <<'PY' || {
+import ipaddress
+import sys
+
+address = ipaddress.ip_address(sys.argv[1])
+if address.version != 4 or not address.is_global:
+    raise SystemExit(1)
+PY
+  printf '%s\n' 'The managed external IPv4 address is unsafe.' >&2
+  exit 1
 }
 [[ "${secret}" =~ ^[0-9a-f]{64}$ ]] || {
   printf '%s\n' 'The managed UI access secret is invalid.' >&2; exit 1;
@@ -1781,7 +1810,7 @@ printf '\nUI URL:\nhttp://%s:%s/\n' "${browser_host}" "${local_port}"
 printf '\nAccess secret:\n%s\n' "${secret}"
 printf '\nSSH tunnel command (run on your computer):\n'
 printf 'ssh -p %s -N -T -L localhost:%s:%s root@%s\n' \
-  "${ssh_port}" "${local_port}" "${remote_socket}" "${domain}"
+  "${ssh_port}" "${local_port}" "${remote_socket}" "${public_ip}"
 EOF
   chmod 0700 "${temporary}"
   chown root:root "${temporary}"

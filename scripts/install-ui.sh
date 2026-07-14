@@ -111,6 +111,7 @@ VPN_PORT="$(state_get vpn_port)"
 CURRENT_IMAGE="$(state_get current_image)"
 [[ -n "${DOMAIN}" && -n "${VPN_PORT}" && -n "${CURRENT_IMAGE}" ]] || die 'Managed state is incomplete.'
 validate_domain "${DOMAIN}"
+PUBLIC_IP="$(resolve_external_ipv4 "${DOMAIN}")"
 [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]] || die "Certificate is missing for ${DOMAIN}."
 openssl x509 -checkend 604800 -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" || \
   die "Certificate for ${DOMAIN} expires in less than seven days."
@@ -437,7 +438,7 @@ install -m 0600 /dev/null "${UI_ACCESS_HANDOFF}"
 cat > "${UI_ACCESS_HANDOFF}" <<EOF
 url=http://${UI_LOCAL_HOST}:${UI_PORT}
 remote_socket=${UI_WEB_SOCKET}
-tunnel_template=ssh -N -L 127.0.0.1:${UI_PORT}:${UI_WEB_SOCKET} root@<vps-host>
+tunnel_template=ssh -N -L 127.0.0.1:${UI_PORT}:${UI_WEB_SOCKET} root@${PUBLIC_IP}
 access_secret=${ACCESS_SECRET}
 expires=operator session is valid for at most 12 hours
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -450,6 +451,7 @@ OCSERV_UI_LOCAL_HOST=${UI_LOCAL_HOST}
 OCSERV_UI_LOCAL_PORT=${UI_PORT}
 OCSERV_UI_SSH_PORT=${SSH_PORT}
 OCSERV_UI_VPN_DOMAIN=${DOMAIN}
+OCSERV_UI_PUBLIC_IP=${PUBLIC_IP}
 EOF
 chmod 0640 "${OCSERV_UI_ENV_FILE}"
 render_ui_access_info_script
@@ -528,6 +530,7 @@ services:
       OCSERV_UI_ALLOWED_ORIGIN: "http://${UI_LOCAL_HOST}:${UI_PORT}"
       OCSERV_UI_IMAGE_NAME: "${UI_IMAGE}"
       OCSERV_UI_VPN_DOMAIN: "${DOMAIN}"
+      OCSERV_UI_PUBLIC_IP: "${PUBLIC_IP}"
       OCSERV_UI_SSH_PORT: "${SSH_PORT}"
       OCSERV_UI_TRUSTED_PROXY_CIDRS: ""
       OCSERV_UI_JSON: /var/lib/ocserv-ui/state.json

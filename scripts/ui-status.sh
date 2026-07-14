@@ -16,7 +16,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_root
-for command in awk cmp curl docker getent id nologin stat systemctl; do require_command "${command}"; done
+for command in awk cmp curl docker getent id nologin python3 stat systemctl; do require_command "${command}"; done
 [[ -x "${OCSERV_UI_HOST_SHELL}" ]] || die "Required nologin shell is unavailable: ${OCSERV_UI_HOST_SHELL}"
 [[ -f "${OCSERV_UI_COMPOSE_FILE}" && ! -L "${OCSERV_UI_COMPOSE_FILE}" && \
    -f "${OCSERV_UI_ENV_FILE}" && ! -L "${OCSERV_UI_ENV_FILE}" ]] || \
@@ -33,10 +33,15 @@ for command in awk cmp curl docker getent id nologin stat systemctl; do require_
 DOMAIN="$(state_get domain)"
 UI_LOCAL_HOST="$(awk -F= '$1 == "OCSERV_UI_LOCAL_HOST" {print substr($0, index($0, "=") + 1); exit}' "${OCSERV_UI_ENV_FILE}")"
 UI_PORT="$(awk -F= '$1 == "OCSERV_UI_LOCAL_PORT" {print substr($0, index($0, "=") + 1); exit}' "${OCSERV_UI_ENV_FILE}")"
+PUBLIC_IP="$(awk -F= '$1 == "OCSERV_UI_PUBLIC_IP" {print substr($0, index($0, "=") + 1); exit}' "${OCSERV_UI_ENV_FILE}")"
+if [[ -z "${PUBLIC_IP}" ]]; then
+  PUBLIC_IP="$(resolve_external_ipv4 "${DOMAIN}")"
+fi
 [[ "${UI_LOCAL_HOST}" =~ ^ocserv-[0-9a-f]{32}\.localhost$ ]] || \
   die 'The managed browser hostname in ui.env is missing or unsafe.'
 [[ -n "${UI_PORT}" ]] || die 'Cannot determine the managed local tunnel port from ui.env.'
 validate_port 'local tunnel port' "${UI_PORT}"
+validate_global_ipv4 "${PUBLIC_IP}" || die 'The managed external IPv4 address is missing or unsafe.'
 ui_host_identity_is_exact || \
   die "Reserved UI host identity must be locked ${OCSERV_UI_HOST_USER} ${OCSERV_UI_HOST_UID}:${OCSERV_UI_HOST_GID}, nologin, with no extra members."
 
@@ -53,7 +58,7 @@ done
 
 printf '\n%s\n' '=== Unix-socket access ==='
 printf 'Browser URL after SSH forwarding: http://%s:%s (secret gate required)\n' "${UI_LOCAL_HOST}" "${UI_PORT}"
-printf 'Tunnel: ssh -N -L 127.0.0.1:%s:%s root@%s\n' "${UI_PORT}" "${OCSERV_UI_WEB_SOCKET}" "${DOMAIN}"
+printf 'Tunnel: ssh -N -L 127.0.0.1:%s:%s root@%s\n' "${UI_PORT}" "${OCSERV_UI_WEB_SOCKET}" "${PUBLIC_IP}"
 printf 'Reserved host identity: %s uid=%s gid=%s, locked nologin, no supplementary/group members\n' \
   "${OCSERV_UI_HOST_USER}" "${OCSERV_UI_HOST_UID}" "${OCSERV_UI_HOST_GID}"
 [[ -f "${OCSERV_UI_TMPFILES_FILE}" && ! -L "${OCSERV_UI_TMPFILES_FILE}" ]] || \

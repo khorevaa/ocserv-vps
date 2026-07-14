@@ -27,11 +27,12 @@ validate_version "${UI_VERSION}"; validate_registry_image "${UI_IMAGE}"; validat
 for path in "${OCSERV_STATE_FILE}" "${OCSERV_ENV_FILE}" "${OCSERV_COMPOSE_FILE}" "${OCSERV_UI_ENV_FILE}" "${OCSERV_UI_COMPOSE_FILE}"; do
   [[ -f "${path}" && ! -L "${path}" ]] || die "Managed file is missing or unsafe: ${path}"
 done
-for command in awk certbot curl docker flock openssl stat systemctl systemd-tmpfiles; do require_command "${command}"; done
+for command in awk certbot curl docker flock getent openssl python3 stat systemctl systemd-tmpfiles; do require_command "${command}"; done
 acquire_stack_locks
 CURRENT_IMAGE="$(state_get current_image)"; VPN_PORT="$(state_get vpn_port)"; DOMAIN="$(state_get domain)"
 [[ -n "${CURRENT_IMAGE}" && -n "${VPN_PORT}" && -n "${DOMAIN}" ]] || die 'Managed VPN state is incomplete.'
 validate_domain "${DOMAIN}"
+PUBLIC_IP="$(resolve_external_ipv4 "${DOMAIN}")"
 
 validate_component() {
   local image="$1" component="$2" version revision source compatibility
@@ -80,6 +81,7 @@ OCSERV_UI_LOCAL_HOST=${UI_LOCAL_HOST}
 OCSERV_UI_LOCAL_PORT=${UI_PORT}
 OCSERV_UI_SSH_PORT=${SSH_PORT}
 OCSERV_UI_VPN_DOMAIN=${DOMAIN}
+OCSERV_UI_PUBLIC_IP=${PUBLIC_IP}
 EOF
 chmod 0640 "${OCSERV_UI_ENV_FILE}"
 cat > "${OCSERV_UI_COMPOSE_FILE}" <<EOF
@@ -137,6 +139,7 @@ services:
       OCSERV_UI_ALLOWED_ORIGIN: "http://${UI_LOCAL_HOST}:${UI_PORT}"
       OCSERV_UI_IMAGE_NAME: "${UI_IMAGE}"
       OCSERV_UI_VPN_DOMAIN: "${DOMAIN}"
+      OCSERV_UI_PUBLIC_IP: "${PUBLIC_IP}"
       OCSERV_UI_SSH_PORT: "${SSH_PORT}"
       OCSERV_UI_TRUSTED_PROXY_CIDRS: ""
       OCSERV_UI_JSON: /var/lib/ocserv-ui/state.json

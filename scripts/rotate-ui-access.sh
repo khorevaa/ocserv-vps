@@ -34,10 +34,16 @@ ACCESS_HANDOFF="/root/ocserv-vps-ui-access"
 
 UI_LOCAL_HOST="$(awk -F= '$1 == "OCSERV_UI_LOCAL_HOST" {print substr($0, index($0, "=") + 1); exit}' "${OCSERV_UI_ENV_FILE}")"
 UI_PORT="$(awk -F= '$1 == "OCSERV_UI_LOCAL_PORT" {print substr($0, index($0, "=") + 1); exit}' "${OCSERV_UI_ENV_FILE}")"
+PUBLIC_IP="$(awk -F= '$1 == "OCSERV_UI_PUBLIC_IP" {print substr($0, index($0, "=") + 1); exit}' "${OCSERV_UI_ENV_FILE}")"
+if [[ -z "${PUBLIC_IP}" ]]; then
+  DOMAIN="$(state_get domain)"
+  PUBLIC_IP="$(resolve_external_ipv4 "${DOMAIN}")"
+fi
 [[ "${UI_LOCAL_HOST}" =~ ^ocserv-[0-9a-f]{32}\.localhost$ ]] || \
   die 'The managed browser hostname in ui.env is missing or unsafe.'
 [[ -n "${UI_PORT}" ]] || die 'Cannot determine the managed local tunnel port from ui.env.'
 validate_port 'local tunnel port' "${UI_PORT}"
+validate_global_ipv4 "${PUBLIC_IP}" || die 'The managed external IPv4 address is missing or unsafe.'
 ui_host_identity_is_exact || die 'The reserved UI host identity is missing or unsafe.'
 
 acquire_stack_locks
@@ -115,7 +121,7 @@ NEW_STATUS="$(ui_curl \
 cat > "${HANDOFF_NEW}" <<EOF
 url=http://${UI_LOCAL_HOST}:${UI_PORT}
 remote_socket=${OCSERV_UI_WEB_SOCKET}
-tunnel_template=ssh -N -L 127.0.0.1:${UI_PORT}:${OCSERV_UI_WEB_SOCKET} root@<vps-host>
+tunnel_template=ssh -N -L 127.0.0.1:${UI_PORT}:${OCSERV_UI_WEB_SOCKET} root@${PUBLIC_IP}
 access_secret=${NEW_SECRET}
 expires=operator session is valid for at most 12 hours
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)

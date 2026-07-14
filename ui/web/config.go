@@ -17,6 +17,7 @@ type config struct {
 	AccessSecretFile      string
 	UIImage               string
 	VPNDomain             string
+	PublicIP              string
 	AllowedOrigin         string
 	AllowedHost           string
 	UILocalPort           int
@@ -44,6 +45,11 @@ func envInt64(name string, fallback, minimum, maximum int64) (int64, error) {
 	return value, nil
 }
 
+func isPublicIPv4(value string) bool {
+	address := net.ParseIP(value)
+	return address != nil && address.To4() != nil && address.IsGlobalUnicast() && !address.IsPrivate()
+}
+
 func loadConfig() (config, error) {
 	var result config
 	var err error
@@ -56,6 +62,10 @@ func loadConfig() (config, error) {
 	result.VPNDomain = strings.TrimSpace(os.Getenv("OCSERV_UI_VPN_DOMAIN"))
 	if !vpnDomainPattern.MatchString(result.VPNDomain) {
 		return result, fmt.Errorf("OCSERV_UI_VPN_DOMAIN is invalid")
+	}
+	result.PublicIP = strings.TrimSpace(os.Getenv("OCSERV_UI_PUBLIC_IP"))
+	if !isPublicIPv4(result.PublicIP) {
+		return result, fmt.Errorf("OCSERV_UI_PUBLIC_IP is invalid")
 	}
 	result.AllowedOrigin = strings.TrimSpace(os.Getenv("OCSERV_UI_ALLOWED_ORIGIN"))
 	if result.AllowedOrigin == "" {

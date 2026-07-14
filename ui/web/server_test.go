@@ -17,6 +17,17 @@ import (
 
 const testOrigin = "http://ocserv-0123456789abcdef0123456789abcdef.localhost:8765"
 
+func TestPublicIPv4Validation(t *testing.T) {
+	if !isPublicIPv4("203.0.113.10") {
+		t.Fatal("public IPv4 was rejected")
+	}
+	for _, value := range []string{"", "vpn.test", "127.0.0.1", "10.0.0.1", "169.254.1.1", "::1"} {
+		if isPublicIPv4(value) {
+			t.Fatalf("unsafe external address accepted: %s", value)
+		}
+	}
+}
+
 func TestContainerLogsForWebNormalizesNullEntries(t *testing.T) {
 	raw := json.RawMessage(`{"entries":null,"page":1,"page_size":25,"total":0,"total_pages":1,"sort":"desc","source":"ui","captured_at":"2026-07-13T12:35:00Z"}`)
 	result, err := containerLogsForWeb(raw)
@@ -153,7 +164,7 @@ func testApplication(t *testing.T, accessSecret string) (*application, config) {
 	writeTestSecret(t, sessionKey, "test-session-key-with-at-least-32-bytes!")
 	writeTestSecret(t, access, accessSecret)
 	startFakeControl(t, control)
-	cfg := config{DataFile: filepath.Join(root, "state.json"), ControlSocket: control, WebSocket: "/run/ocserv-ui-web/web.sock", SessionKeyFile: sessionKey, AccessSecretFile: access, UIImage: "ghcr.io/khorevaa/ocserv-vps-ui-web:0.4.5", VPNDomain: "vpn.test", AllowedOrigin: testOrigin, AllowedHost: strings.TrimPrefix(testOrigin, "http://"), UILocalPort: 8765, SSHPort: 2222, SessionTTLSeconds: 3600, AuditRetentionSeconds: 3600, AuditMaxRows: 20, ControlTimeoutSeconds: 1, MaxRequestBytes: 16384, RequireRootSecrets: false}
+	cfg := config{DataFile: filepath.Join(root, "state.json"), ControlSocket: control, WebSocket: "/run/ocserv-ui-web/web.sock", SessionKeyFile: sessionKey, AccessSecretFile: access, UIImage: "ghcr.io/khorevaa/ocserv-vps-ui-web:0.4.5", VPNDomain: "vpn.test", PublicIP: "203.0.113.10", AllowedOrigin: testOrigin, AllowedHost: strings.TrimPrefix(testOrigin, "http://"), UILocalPort: 8765, SSHPort: 2222, SessionTTLSeconds: 3600, AuditRetentionSeconds: 3600, AuditMaxRows: 20, ControlTimeoutSeconds: 1, MaxRequestBytes: 16384, RequireRootSecrets: false}
 	app, err := newApplication(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -463,7 +474,7 @@ func TestUIInfoMasksAccessSecret(t *testing.T) {
 	access := perform(app, "POST", "/api/v1/access", `{"secret":"`+strings.Repeat("A", 64)+`"}`, nil, "")
 	cookie := access.Result().Cookies()[0]
 	response := perform(app, "GET", "/api/v1/ui", "", cookie, "")
-	if response.Code != 200 || !strings.Contains(response.Body.String(), "ocserv-vps-ui-web:0.4.5") || !strings.Contains(response.Body.String(), `ssh -p 2222 -N -T -L localhost:8765:/run/ocserv-ui-web/web.sock root@vpn.test`) || strings.Contains(response.Body.String(), strings.Repeat("A", 64)) {
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "ocserv-vps-ui-web:0.4.5") || !strings.Contains(response.Body.String(), `ssh -p 2222 -N -T -L localhost:8765:/run/ocserv-ui-web/web.sock root@203.0.113.10`) || strings.Contains(response.Body.String(), strings.Repeat("A", 64)) {
 		t.Fatalf("ui info=%d %s", response.Code, response.Body.String())
 	}
 }
