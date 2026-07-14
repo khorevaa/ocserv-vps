@@ -712,7 +712,7 @@ func (s *controlService) connectionServerURL(domain string, port int) (string, e
 		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
 			unquoted, unquoteErr := strconv.Unquote(value)
 			if unquoteErr != nil {
-				return "", controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+				return "", controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 			}
 			value = unquoted
 		}
@@ -724,7 +724,7 @@ func (s *controlService) connectionServerURL(domain string, port int) (string, e
 			case "false":
 				enabled = false
 			default:
-				return "", controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+				return "", controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 			}
 		case "camouflage_secret":
 			secret = value
@@ -734,7 +734,7 @@ func (s *controlService) connectionServerURL(domain string, port int) (string, e
 		return base, nil
 	}
 	if !camouflageSecretPattern.MatchString(secret) {
-		return "", controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+		return "", controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 	}
 	return base + "?" + secret, nil
 }

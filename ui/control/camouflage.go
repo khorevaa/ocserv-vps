@@ -63,7 +63,7 @@ func (s *controlService) readOcservDirectives() (map[string]string, error) {
 		if strings.HasPrefix(value, `"`) || strings.HasSuffix(value, `"`) {
 			unquoted, unquoteErr := strconv.Unquote(value)
 			if unquoteErr != nil {
-				return nil, controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+				return nil, controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 			}
 			value = unquoted
 		}
@@ -83,7 +83,7 @@ func camouflageBool(directives map[string]string, key string, fallback bool) (bo
 	case "false":
 		return false, nil
 	default:
-		return false, controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+		return false, controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 	}
 }
 
@@ -97,7 +97,7 @@ func camouflagePort(value string, fallback int, allowZero bool) (int, error) {
 		minimum = 0
 	}
 	if err != nil || port < minimum || port > 65535 {
-		return 0, controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+		return 0, controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 	}
 	return port, nil
 }
@@ -108,7 +108,7 @@ func (s *controlService) camouflageSite() (*camouflageSiteInfo, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, controlFailure(500, "invalid_camouflage_site", "The managed Camouflage website metadata is unreadable.")
+		return nil, controlFailure(500, "invalid_camouflage_site", "Не удалось прочитать метаданные сайта режима маскировки.")
 	}
 	label := strings.TrimSpace(string(content))
 	switch label {
@@ -121,7 +121,7 @@ func (s *controlService) camouflageSite() (*camouflageSiteInfo, error) {
 	case "custom-download":
 		return &camouflageSiteInfo{Source: "custom", Preset: "custom", Name: "Custom download"}, nil
 	default:
-		return nil, controlFailure(500, "invalid_camouflage_site", "The managed Camouflage website metadata is invalid.")
+		return nil, controlFailure(500, "invalid_camouflage_site", "Метаданные сайта режима маскировки некорректны.")
 	}
 }
 
@@ -164,13 +164,13 @@ func (s *controlService) camouflageInfo() (camouflageRuntimeInfo, error) {
 		listenHost = "0.0.0.0"
 	}
 	if parsed := net.ParseIP(listenHost); parsed == nil {
-		return camouflageRuntimeInfo{}, controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+		return camouflageRuntimeInfo{}, controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 	}
 	realm := ""
 	secretConfigured := false
 	if enabled {
 		if !camouflageSecretPattern.MatchString(directives["camouflage_secret"]) || !camouflageRealmPattern.MatchString(directives["camouflage_realm"]) {
-			return camouflageRuntimeInfo{}, controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+			return camouflageRuntimeInfo{}, controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 		}
 		secretConfigured = true
 		realm = directives["camouflage_realm"]
@@ -183,7 +183,7 @@ func (s *controlService) camouflageInfo() (camouflageRuntimeInfo, error) {
 		return camouflageRuntimeInfo{}, err
 	}
 	if site != nil && !advancedTransport {
-		return camouflageRuntimeInfo{}, controlFailure(500, "invalid_camouflage_state", "The managed Advanced Camouflage configuration is inconsistent.")
+		return camouflageRuntimeInfo{}, controlFailure(500, "invalid_camouflage_state", "Конфигурация продвинутого режима маскировки противоречива.")
 	}
 	mode := "disabled"
 	if enabled {
@@ -218,10 +218,10 @@ func (s *controlService) camouflageSecret() (map[string]string, error) {
 	}
 	secret := directives["camouflage_secret"]
 	if !enabled {
-		return nil, controlFailure(409, "camouflage_disabled", "Camouflage is disabled.")
+		return nil, controlFailure(409, "camouflage_disabled", "Режим маскировки отключён.")
 	}
 	if !camouflageSecretPattern.MatchString(secret) {
-		return nil, controlFailure(500, "invalid_configuration", "The managed Camouflage configuration is invalid.")
+		return nil, controlFailure(500, "invalid_configuration", "Конфигурация режима маскировки некорректна.")
 	}
 	return map[string]string{"secret": secret}, nil
 }

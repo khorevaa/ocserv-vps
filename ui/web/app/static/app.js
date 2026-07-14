@@ -867,7 +867,7 @@
       },
       native: {
         name: "Скрытый режим ocserv",
-        badge: "Native Camouflage",
+        badge: "Нативный режим маскировки",
         description: "ocserv проверяет секрет в URL, но отдельный Nginx-сайт маскировки не запущен.",
       },
       advanced: {

@@ -253,6 +253,10 @@ class InstallComposeContractTests(unittest.TestCase):
         self.assertIn('id="overview-camouflage-mode"', index)
         self.assertIn('href="#camouflage"', index)
         self.assertIn("renderOverviewCamouflage(normalizeCamouflage(camouflage))", app)
+        self.assertIn("<dt>Режим маскировки</dt>", index)
+        self.assertIn('badge: "Нативный режим маскировки"', app)
+        self.assertNotIn("<dt>Camouflage</dt>", index)
+        self.assertNotIn('badge: "Native Camouflage"', app)
 
     def test_configuration_editor_is_read_only_by_default_and_validated_before_restart(self) -> None:
         repository = pathlib.Path(__file__).resolve().parents[3]

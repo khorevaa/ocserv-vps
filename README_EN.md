@@ -118,7 +118,7 @@ Browser routing relies on HTTP/2 ALPN. An HTTP/1.1-only browser or a purpose-bui
 Pass a tag to install a specific manager release:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.15
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.16
 ```
 
 ## Management
