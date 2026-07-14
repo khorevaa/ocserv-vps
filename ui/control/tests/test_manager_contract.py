@@ -33,6 +33,7 @@ class ManagerContractTests(unittest.TestCase):
         )
 
     def test_installer_matches_one_command_release_install_contract(self) -> None:
+        self.assertIn("Usage: install.sh [release-tag]", self.installer)
         self.assertIn("[[ ${EUID} -eq 0 ]]", self.installer)
         self.assertIn("/etc/os-release", self.installer)
         self.assertIn("arch()", self.installer)
@@ -46,6 +47,15 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn('command_path="${OCSERV_VPS_COMMAND_PATH:-/usr/local/bin/ocserv-vps}"', self.installer)
         self.assertIn('cp -a "${source_root}/camouflage" "${new_root}/camouflage"', self.installer)
         self.assertIn('"${command_path}" install', self.installer)
+        for variable in (
+            "OCSERV_CAMOUFLAGE=0|1",
+            "OCSERV_CAMOUFLAGE_SECRET=<secret>",
+            "OCSERV_CAMOUFLAGE_REALM=<realm>",
+            "OCSERV_ADVANCED_CAMOUFLAGE=0|1",
+            "OCSERV_CAMOUFLAGE_SITE_TEMPLATE=synology|owncloud|workspace|custom",
+            "OCSERV_CAMOUFLAGE_SITE_URL=<https-url>",
+        ):
+            self.assertIn(variable, self.installer)
         self.assertIn('OCSERV_VPS_INSTALL_ONLY=1 bash "${installer}" "${tag}"', self.manager)
         self.assertNotIn('${version:+"${version}"}', self.manager)
 
@@ -102,6 +112,20 @@ class ManagerContractTests(unittest.TestCase):
         self.assertIn("show_initial_vpn_credentials", self.manager)
         self.assertIn("VPN username: %s", self.manager)
         self.assertIn("VPN password: %s", self.manager)
+
+    def test_readmes_expose_camouflage_options_in_unattended_install(self) -> None:
+        for filename in ("README.md", "README_EN.md"):
+            readme = (self.repository / filename).read_text(encoding="utf-8")
+            quick_install = readme.split("curl -Ls", 2)[2].split("```", 1)[0]
+            self.assertIn("OCSERV_CAMOUFLAGE=1", quick_install)
+            self.assertIn("OCSERV_CAMOUFLAGE_REALM='Test Environment'", quick_install)
+            self.assertIn("OCSERV_ADVANCED_CAMOUFLAGE=0", quick_install)
+            for variable in (
+                "OCSERV_CAMOUFLAGE_SECRET",
+                "OCSERV_CAMOUFLAGE_SITE_TEMPLATE",
+                "OCSERV_CAMOUFLAGE_SITE_URL",
+            ):
+                self.assertIn(variable, readme)
 
     def test_release_defaults_and_transitions_are_immutable_and_transactional(self) -> None:
         common = (self.repository / "scripts" / "common.sh").read_text(encoding="utf-8")

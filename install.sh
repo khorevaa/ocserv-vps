@@ -12,6 +12,36 @@ repository="${OCSERV_VPS_REPOSITORY:-khorevaa/ocserv-vps}"
 install_root="${OCSERV_VPS_INSTALL_ROOT:-/usr/local/lib/ocserv-vps}"
 command_path="${OCSERV_VPS_COMMAND_PATH:-/usr/local/bin/ocserv-vps}"
 
+usage() {
+  cat <<'EOF'
+Usage: install.sh [release-tag]
+
+Installs the ocserv-vps manager and starts guided setup. For unattended setup,
+provide OCSERV_DOMAIN and the other required values through the environment.
+
+Camouflage options:
+  OCSERV_CAMOUFLAGE=0|1
+      Enable native ocserv Camouflage. Defaults to 0.
+  OCSERV_CAMOUFLAGE_SECRET=<secret>
+      Optional 16-128 character URL-safe secret; generated when omitted.
+  OCSERV_CAMOUFLAGE_REALM=<realm>
+      Native/custom realm. Defaults to "Test Environment".
+  OCSERV_ADVANCED_CAMOUFLAGE=0|1
+      Enable TCP-only Nginx website Camouflage. Requires OCSERV_CAMOUFLAGE=1.
+  OCSERV_CAMOUFLAGE_SITE_TEMPLATE=synology|owncloud|workspace|custom
+      Advanced website preset. Defaults to synology.
+  OCSERV_CAMOUFLAGE_SITE_URL=<https-url>
+      Direct static-site download used only with the custom preset.
+EOF
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+esac
+
 [[ ${EUID} -eq 0 ]] || {
   echo -e "${red}Fatal error:${plain} run this script with root privileges." >&2
   exit 1

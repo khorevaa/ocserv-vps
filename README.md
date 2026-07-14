@@ -44,10 +44,15 @@ curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.s
   OCSERV_DOMAIN=vpn.example.com \
   OCSERV_ACME_EMAIL=admin@example.com \
   OCSERV_VPN_USERNAME=vpnuser \
+  OCSERV_CAMOUFLAGE=1 \
+  OCSERV_CAMOUFLAGE_REALM='Test Environment' \
+  OCSERV_ADVANCED_CAMOUFLAGE=0 \
   OCSERV_APPROVE_FIREWALL=1 \
   OCSERV_APPROVE_RESTART=1 \
   bash
 ```
+
+Этот пример устанавливает нативную маскировку ocserv. Чтобы установить сервер без маскировки, задайте `OCSERV_CAMOUFLAGE=0` и не передавайте остальные параметры маскировки. Для продвинутого режима используйте пример ниже.
 
 Если переменная `OCSERV_DOMAIN` не задана и stdin не интерактивен, установится только менеджер. Настройку можно продолжить командой:
 
@@ -60,6 +65,15 @@ sudo ocserv-vps install
 Во время интерактивной установки можно включить Camouflage. Установщик запросит HTTP realm (по умолчанию `Test Environment`), который ocserv показывает посторонним запросам, а VPN-клиенту потребуется адрес вида `https://vpn.example.com:443/?секрет`. Секрет выводится только в составе чувствительных VPN-реквизитов и сохраняется в защищённой конфигурации сервера.
 
 Для установки без диалогов задайте `OCSERV_CAMOUFLAGE=1`. Переменная `OCSERV_CAMOUFLAGE_SECRET` необязательна: если её не задать, будет создан случайный 32-символьный секрет. `OCSERV_CAMOUFLAGE_REALM` по умолчанию равна `Test Environment`. Для секрета допустимы 16–128 URL-безопасных символов: латинские буквы, цифры, `.`, `_`, `~`, `-`.
+
+| Переменная `install.sh` | Назначение |
+| --- | --- |
+| `OCSERV_CAMOUFLAGE=0\|1` | Отключить маскировку или включить нативный Camouflage |
+| `OCSERV_CAMOUFLAGE_SECRET` | Необязательный секрет; при отсутствии генерируется автоматически |
+| `OCSERV_CAMOUFLAGE_REALM` | Realm нативного или пользовательского режима; для встроенного пресета берётся из `camouflage.json` |
+| `OCSERV_ADVANCED_CAMOUFLAGE=0\|1` | Включить продвинутый TCP-only режим; требует `OCSERV_CAMOUFLAGE=1` |
+| `OCSERV_CAMOUFLAGE_SITE_TEMPLATE` | Пресет `synology`, `owncloud`, `workspace` или `custom` |
+| `OCSERV_CAMOUFLAGE_SITE_URL` | Прямая HTTPS-ссылка на заглушку; только для пресета `custom` |
 
 ```bash
 OCSERV_CAMOUFLAGE=1 \
@@ -102,7 +116,7 @@ Custom URL должен возвращать файл напрямую по HTTP
 Конкретную версию менеджера можно указать аргументом:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.9
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.14
 ```
 
 ## Управление
