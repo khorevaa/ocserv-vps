@@ -48,6 +48,7 @@ func TestCamouflageInfoReportsAdvancedPresetWithoutSecret(t *testing.T) {
 	if result.Mode != "advanced" || !result.CamouflageEnabled || !result.SecretConfigured || result.Realm != "Test Environment" ||
 		result.PublicPort != 443 || result.TCPPort != 8443 || result.UDPPort != 0 || result.ListenHost != "127.0.0.1" ||
 		!result.NoUDP || !result.ProxyProtocol || !result.Advanced.Enabled || result.Advanced.Container != "ocserv-camouflage-site" ||
+		result.Advanced.BrowserProtocol != "ALPN h2 / http/1.1" || result.Advanced.VPNProtocol != "other / no ALPN + CSTP" ||
 		result.Advanced.Site == nil || result.Advanced.Site.Preset != "owncloud" || result.Advanced.Site.Name != "ownCloud" {
 		t.Fatalf("unexpected Camouflage info: %#v", result)
 	}

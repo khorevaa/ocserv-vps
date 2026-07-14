@@ -96,7 +96,7 @@ func camouflageForWeb(raw json.RawMessage, vpnDomain string) (map[string]any, er
 	if advanced.Enabled {
 		if value.PublicPort != 443 || value.TCPPort != 8443 || value.UDPPort != 0 || value.ListenHost != "127.0.0.1" ||
 			!value.NoUDP || !value.ProxyProtocol || advanced.Container != "ocserv-camouflage-site" || advanced.CoverPort != 8444 ||
-			advanced.BrowserProtocol != "HTTP/2" || advanced.VPNProtocol != "HTTP/1.1 + CSTP" || advanced.SiteMount != "/srv/camouflage:ro" ||
+			advanced.BrowserProtocol != "ALPN h2 / http/1.1" || advanced.VPNProtocol != "other / no ALPN + CSTP" || advanced.SiteMount != "/srv/camouflage:ro" ||
 			!validCamouflageSite(advanced.Site) {
 			return nil, fmt.Errorf("invalid control response")
 		}

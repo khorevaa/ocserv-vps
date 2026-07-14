@@ -800,7 +800,7 @@
       if (endpoint.public_port !== 443 || transport.tcp_port !== 8443 || transport.udp_port !== 0
         || transport.listen_host !== "127.0.0.1" || !transport.no_udp || !transport.proxy_protocol
         || advanced.container !== "ocserv-camouflage-site" || advanced.cover_port !== 8444
-        || advanced.browser_protocol !== "HTTP/2" || advanced.vpn_protocol !== "HTTP/1.1 + CSTP"
+        || advanced.browser_protocol !== "ALPN h2 / http/1.1" || advanced.vpn_protocol !== "other / no ALPN + CSTP"
         || advanced.site_mount !== "/srv/camouflage:ro") {
         throw new Error("Сервер вернул некорректную схему продвинутой маскировки.");
       }
@@ -873,7 +873,7 @@
       advanced: {
         name: "Продвинутая маскировка",
         badge: "Nginx + ocserv",
-        description: "Браузерам показывается сайт-заглушка по HTTP/2, а VPN-трафик направляется в ocserv по TCP.",
+        description: "Для VPN-домена ALPN h2/http1.1 ведёт на заглушку, а другой или отсутствующий ALPN — в ocserv; неизвестный SNI тоже получает заглушку.",
       },
     };
     const current = labels[data.mode];

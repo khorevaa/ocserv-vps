@@ -86,7 +86,7 @@ sudo -E ocserv-vps install
 
 #### Advanced website camouflage
 
-After native Camouflage is enabled, the installer can enable an advanced TCP-only mode and offer a cover-site choice. A separate `ocserv-camouflage-site` Nginx container owns public TCP/443 through host networking: HTTP/2 browsers receive the selected website, while HTTP/1.1 OpenConnect/AnyConnect traffic is passed to the `ocserv-vps` container on `127.0.0.1:8443`. Nginx does not terminate the ocserv TLS connection, the client address is preserved with PROXY protocol, and ocserv still validates the URL secret.
+After native Camouflage is enabled, the installer can enable an advanced TCP-only mode and offer a cover-site choice. A separate `ocserv-camouflage-site` Nginx container owns public TCP/443 through host networking: TLS clients advertising ALPN `h2` or `http/1.1` receive the selected website, while connections with another or no ALPN are passed to the `ocserv-vps` container on `127.0.0.1:8443`. Nginx does not terminate the ocserv TLS connection, the client address is preserved with PROXY protocol, and ocserv still validates the URL secret.
 
 Three built-in presets are available: `synology`, `owncloud`, and `workspace`. Their `camouflage.json` contracts generate exact local Nginx routes for entry pages, characteristic bootstrap requests, and fixed no-credential form responses. The fourth choice, `custom`, downloads a user-supplied cover site from `OCSERV_CAMOUFLAGE_SITE_URL`. The URL is used once during installation to download a file; it is not a reverse-proxy origin. ZIP, TAR/TAR.GZ, and standalone HTML downloads are supported and must produce a root `index.html`.
 
@@ -98,6 +98,8 @@ sudo -E ocserv-vps install
 ```
 
 The generated Nginx configuration and selected site are bind-mounted read-only into `ocserv-camouflage-site` when Compose starts it. The official Nginx image is resolved to an immutable digest during installation and stored in the protected stack environment.
+
+On an existing installation, a new generated Nginx configuration is applied transactionally during the next VPN image update with `ocserv-vps update`: the configuration is validated before activation and the previous file is restored on failure. `update-manager` only replaces manager files and does not restart the running stack by itself.
 
 For the most advanced custom choice:
 
@@ -113,12 +115,12 @@ The custom URL must return the file directly over HTTPS without a redirect, cont
 
 UDP/DTLS is intentionally disabled completely in this mode: UDP/443 is not opened in the firewall and ocserv receives `udp-port = 0` plus `no-udp = true`, so it does not create even a local UDP listener. Public port `443` is required.
 
-Browser routing relies on HTTP/2 ALPN. An HTTP/1.1-only browser or a purpose-built probe reaches ocserv's native Camouflage response (404/401), so this mode improves the appearance of ordinary browsing but does not claim to be indistinguishable under active analysis.
+Routing relies only on plaintext TLS ClientHello fields: the expected SNI with ALPN `h2` or `http/1.1` is sent to the cover site, while another or no ALPN is sent to ocserv. An unknown SNI is always sent to the cover site. A VPN client that advertises `h2` or `http/1.1` itself will reach the cover site and fail to connect in this mode, so verify the exact client version you use. A purpose-built probe with the expected SNI and no browser ALPN can still reach ocserv's native Camouflage response (404/401): this scheme blocks easy discovery by a modern HTTP/1.1 client that advertises that ALPN, but it does not resist active analysis.
 
 Pass a tag to install a specific manager release:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.16
+bash <(curl -Ls https://raw.githubusercontent.com/khorevaa/ocserv-vps/develop/install.sh) v0.1.17
 ```
 
 ## Management

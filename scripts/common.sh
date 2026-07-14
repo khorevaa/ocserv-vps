@@ -1452,8 +1452,8 @@ ${camouflage_locations}
     }
 }
 
-# Browsers advertising HTTP/2 receive the cover site. AnyConnect/OpenConnect
-# and HTTP/1.1 probes retain end-to-end TLS and are passed to ocserv.
+# Browsers advertising HTTP/2 or HTTP/1.1 receive the cover site. VPN clients
+# using another ALPN value (or no ALPN) retain end-to-end TLS to ocserv.
 stream {
     map \$ssl_preread_server_name \$ocserv_vps_known_sni {
         ${domain} 1;
@@ -1461,7 +1461,8 @@ stream {
     }
 
     map "\$ocserv_vps_known_sni:\$ssl_preread_alpn_protocols" \$ocserv_vps_backend {
-        ~^1:.*\\bh2\\b 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};
+        ~^1:(?:[^,]+,)*h2(?:,|\$) 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};
+        ~^1:(?:[^,]+,)*http/1\\.1(?:,|\$) 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};
         ~^1: 127.0.0.1:${OCSERV_CAMOUFLAGE_TCP_PORT};
         default 127.0.0.1:${OCSERV_CAMOUFLAGE_WEB_PORT};
     }
@@ -1481,15 +1482,19 @@ EOF
 }
 
 verify_advanced_camouflage_site() {
-  local domain="$1" server_ip http_version
+  local domain="$1" server_ip http1_version http2_version
   validate_domain "${domain}"
   server_ip="$(ip -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')"
   [[ -n "${server_ip}" ]] || die 'Cannot determine the VPS IPv4 address for the Camouflage site probe.'
-  http_version="$(curl --noproxy '*' --http2 --fail --silent --show-error --max-time 30 \
+  http2_version="$(curl --noproxy '*' --http2 --fail --silent --show-error --max-time 30 \
     --output /dev/null --write-out '%{http_version}' \
     --resolve "${domain}:443:${server_ip}" "https://${domain}/")"
-  [[ "${http_version}" == 2 ]] || die 'Advanced Camouflage cover site did not negotiate HTTP/2.'
-  info "Advanced Camouflage HTTP/2 cover-site probe passed for https://${domain}/."
+  [[ "${http2_version}" == 2 ]] || die 'Advanced Camouflage cover site did not negotiate HTTP/2.'
+  http1_version="$(curl --noproxy '*' --http1.1 --fail --silent --show-error --max-time 30 \
+    --output /dev/null --write-out '%{http_version}' \
+    --resolve "${domain}:443:${server_ip}" "https://${domain}/")"
+  [[ "${http1_version}" == 1.1 ]] || die 'Advanced Camouflage cover site did not negotiate HTTP/1.1.'
+  info "Advanced Camouflage HTTP/2 and HTTP/1.1 cover-site probes passed for https://${domain}/."
 }
 
 create_password_user() {

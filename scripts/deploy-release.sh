@@ -52,10 +52,21 @@ create_stack_backup "deploy-${VERSION}"
 BACKUP_DIR="${LAST_BACKUP}"
 
 ACTIVATION_COMMITTED="0"
+ADVANCED_CAMOUFLAGE_ACTIVE="0"
+CAMOUFLAGE_IMAGE=""
 PROBE_USER_CREATED="0"
 PROBE_USERNAME=""
+if [[ -f "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]]; then
+  [[ ! -L "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" ]] || die 'The managed Camouflage nginx configuration is unsafe.'
+  cp -a "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}" "${BACKUP_DIR}/camouflage-nginx.conf"
+  CAMOUFLAGE_IMAGE="$(awk -F= '$1 == "OCSERV_CAMOUFLAGE_IMAGE" {print substr($0, index($0, "=") + 1); found++} END {if (found != 1) exit 1}' \
+    "${OCSERV_ENV_FILE}")" || die 'The managed Camouflage image reference is missing or duplicated.'
+  [[ "${CAMOUFLAGE_IMAGE}" =~ ^(docker\.io/)?(library/)?nginx@sha256:[0-9a-f]{64}$ ]] || \
+    die 'The Camouflage sidecar image must be an immutable official nginx digest.'
+  ADVANCED_CAMOUFLAGE_ACTIVE="1"
+fi
 restore_previous_image() {
-  local restore_failed=0
+  local restore_failed=0 camouflage_restored=0 camouflage_temporary=""
   warn "Restoring ${OLD_IMAGE}."
   set +e
   if [[ -f "${BACKUP_DIR}/config.tar" ]] && \
@@ -63,12 +74,36 @@ restore_previous_image() {
     warn 'Failed to restore the previous ocserv configuration.'
     restore_failed=1
   fi
+  if [[ "${ADVANCED_CAMOUFLAGE_ACTIVE}" == "1" ]]; then
+    if [[ ! -f "${BACKUP_DIR}/camouflage-nginx.conf" || \
+          -L "${BACKUP_DIR}/camouflage-nginx.conf" ]]; then
+      warn 'The previous Camouflage nginx configuration is missing or unsafe.'
+      restore_failed=1
+    else
+      camouflage_temporary="$(mktemp "${OCSERV_CAMOUFLAGE_ROOT}/.nginx.conf.rollback.XXXXXX")"
+      if [[ -n "${camouflage_temporary}" ]] && \
+         install -m 0640 "${BACKUP_DIR}/camouflage-nginx.conf" "${camouflage_temporary}" && \
+         mv -f "${camouflage_temporary}" "${OCSERV_CAMOUFLAGE_NGINX_CONFIG}"; then
+        camouflage_restored=1
+        camouflage_temporary=""
+      else
+        [[ -z "${camouflage_temporary}" ]] || rm -f "${camouflage_temporary}"
+        warn 'Failed to restore the previous Camouflage nginx configuration.'
+        restore_failed=1
+      fi
+    fi
+  fi
   if ! write_stack_env "${OLD_IMAGE}"; then
     warn 'Failed to restore the previous stack.env.'
     restore_failed=1
   fi
   if ! compose up -d --remove-orphans >/dev/null 2>&1; then
     warn 'Failed to reactivate the previous Compose stack.'
+    restore_failed=1
+  fi
+  if [[ "${camouflage_restored}" == "1" ]] && \
+     ! compose up -d --no-deps --force-recreate camouflage-site >/dev/null 2>&1; then
+    warn 'Failed to remount the previous Camouflage nginx configuration.'
     restore_failed=1
   fi
   if ! health_check_stack "${OLD_IMAGE}" "${VPN_PORT}" "${HEALTH_TIMEOUT}"; then
@@ -108,10 +143,19 @@ trap 'exit 130' HUP INT TERM
 # directives and replace the old Bash-only journal hook with its POSIX version.
 ensure_vpn_journal_config
 test_image_config "${NEW_IMAGE}"
+if [[ "${ADVANCED_CAMOUFLAGE_ACTIVE}" == "1" ]]; then
+  render_advanced_camouflage_nginx "${DOMAIN}" "${VPN_PORT}"
+  test_camouflage_image_config "${CAMOUFLAGE_IMAGE}"
+fi
 
 info "Activating ${NEW_IMAGE}; active VPN sessions will disconnect."
 write_stack_env "${NEW_IMAGE}"
 compose up -d --remove-orphans
+if [[ "${ADVANCED_CAMOUFLAGE_ACTIVE}" == "1" ]]; then
+  # The nginx config is replaced atomically, so recreate the container to
+  # remount the new inode instead of continuing to serve the old bind mount.
+  compose up -d --no-deps --force-recreate camouflage-site
+fi
 health_check_stack "${NEW_IMAGE}" "${VPN_PORT}" "${HEALTH_TIMEOUT}" || die 'New image failed health checks.'
 health_check_ui_stack "${HEALTH_TIMEOUT}" || die 'Managed UI failed health checks after ocserv activation.'
 PROBE_USERNAME="ocserv-check-$(openssl rand -hex 4)"
@@ -120,6 +164,9 @@ PROBE_PASSWORD="${GENERATED_VPN_PASSWORD}"
 PROBE_USER_CREATED="1"
 docker kill --signal HUP "${OCSERV_CONTAINER}" >/dev/null 2>&1 || true
 verify_openconnect_data_path "${DOMAIN}" "${VPN_PORT}" "${PROBE_USERNAME}" "${PROBE_PASSWORD}"
+if [[ "${ADVANCED_CAMOUFLAGE_ACTIVE}" == "1" ]]; then
+  verify_advanced_camouflage_site "${DOMAIN}"
+fi
 delete_password_user "${NEW_IMAGE}" "${PROBE_USERNAME}"
 PROBE_USER_CREATED="0"
 unset PROBE_PASSWORD GENERATED_VPN_PASSWORD
